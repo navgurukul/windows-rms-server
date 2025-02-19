@@ -1,81 +1,102 @@
+// server.js
 const express = require('express');
-const bodyParser = require('body-parser');
+const { Pool } = require('pg');
+const cors = require('cors');
+require('dotenv').config();
+
 const app = express();
+app.use(express.json());
+app.use(cors());
 
-// In-memory storage (replace with a database in production)
-const clients = new Map();
-const commands = new Map();
-const metrics = new Map();
-
-app.use(bodyParser.json());
-
-// Client registration endpoint
-app.post('/register', (req, res) => {
-    const clientInfo = req.body;
-    clients.set(clientInfo.clientId, {
-        ...clientInfo,
-        lastSeen: new Date(),
-        active: true
-    });
-
-    console.log(`New client registered: ${clientInfo.hostname}`);
-    res.json({ status: 'registered' });
+// PostgreSQL connection setup
+const pool = new Pool({
+    user: 'postgres',
+    host: 'localhost',
+    database: 'laptop_tracking',
+    password: 'password', // Use your actual password
+    port: 5432,
 });
 
-// Command queue endpoint
-app.get('/commands/:clientId', (req, res) => {
-    const clientId = req.params.clientId;
-    const pendingCommands = commands.get(clientId) || [];
-    res.json(pendingCommands);
-
-    // Clear commands after sending
-    commands.set(clientId, []);
-});
-
-// Command status update endpoint
-app.post('/command-status', (req, res) => {
-    const { clientId, commandId, status, error } = req.body;
-    console.log(`Command ${commandId} for client ${clientId} completed with status: ${status}`);
-    if (error) {
-        console.error(`Command error: ${error}`);
+// Test database connection
+pool.query('SELECT NOW()', (err, res) => {
+    if (err) {
+        console.error('Database connection error:', err);
+    } else {
+        console.log('Database connected successfully');
     }
-    res.json({ status: 'received' });
 });
 
-// Metrics collection endpoint
-app.post('/metrics/:clientId', (req, res) => {
-    const clientId = req.params.clientId;
-    const clientMetrics = metrics.get(clientId) || [];
-    clientMetrics.push({
-        ...req.body,
-        timestamp: new Date()
-    });
-
-    // Keep only last 24 hours of metrics
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const filteredMetrics = clientMetrics.filter(m => m.timestamp > oneDayAgo);
-
-    metrics.set(clientId, filteredMetrics);
-    res.json({ status: 'received' });
-});
-
-// Admin API to send commands to clients
-app.post('/admin/send-command', (req, res) => {
-    const { clientId, command } = req.body;
-
-    if (!clients.has(clientId)) {
-        return res.status(404).json({ error: 'Client not found' });
+// API Endpoints for tracking laptop usage
+// 1. Register a device
+app.post('/api/devices', async (req, res) => {
+    const { hostname, device_name } = req.body;
+    try {
+        const result = await pool.query(
+            'INSERT INTO devices (hostname, device_name) VALUES ($1, $2) RETURNING *',
+            [hostname, device_name]
+        );
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error registering device:', error);
+        res.status(500).json({ error: 'Failed to register device' });
     }
+});
 
-    const clientCommands = commands.get(clientId) || [];
-    clientCommands.push({
-        id: Date.now().toString(),
-        ...command,
-        timestamp: new Date()
-    });
+// 2. Start a session
+app.post('/api/sessions/start', async (req, res) => {
+    const { device_id } = req.body;
+    try {
+        const result = await pool.query(
+            'INSERT INTO usage_sessions (device_id, start_time) VALUES ($1, NOW()) RETURNING *',
+            [device_id]
+        );
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error starting session:', error);
+        res.status(500).json({ error: 'Failed to start session' });
+    }
+});
 
-    commands.set(clientId, clientCommands);
-    res.json({ status: 'command-queued' });
+// 3. End a session
+app.put('/api/sessions/:session_id/end', async (req, res) => {
+    const { session_id } = req.params;
+    try {
+        const result = await pool.query(
+            `UPDATE usage_sessions 
+             SET end_time = NOW(),
+             duration_minutes = EXTRACT(EPOCH FROM (NOW() - start_time))/60
+             WHERE id = $1 
+             RETURNING *`,
+            [session_id]
+        );
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Error ending session:', error);
+        res.status(500).json({ error: 'Failed to end session' });
+    }
+});
+
+// 4. Get daily usage summary
+app.get('/api/usage/:device_id', async (req, res) => {
+    const { device_id } = req.params;
+    try {
+        const result = await pool.query(
+            `SELECT 
+                DATE(start_time) as date,
+                SUM(duration_minutes) as total_minutes,
+                COUNT(*) as session_count
+             FROM usage_sessions
+             WHERE device_id = $1
+             AND end_time IS NOT NULL
+             GROUP BY DATE(start_time)
+             ORDER BY date DESC`,
+            [device_id]
+        );
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching usage:', error);
+        res.status(500).json({ error: 'Failed to fetch usage data' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
