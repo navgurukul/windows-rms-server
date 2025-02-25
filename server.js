@@ -1,74 +1,82 @@
 const express = require('express');
 const { Pool } = require('pg');
-const os = require('os');
-
 const app = express();
-app.use(express.json()); // For parsing JSON bodies
 
-// Database configuration
+app.use(express.json());
+
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: 'laptop_tracking',
-  password: 'your_password',
-  port: 5432,
+    user: 'postgres',
+    host: 'localhost',
+    database: 'laptop_tracking',
+    password: 'password',
+    port: 5432,
 });
 
-// POST endpoint to receive metrics
-app.post('/api/metrics', async (req, res) => {
-  try {
-    const { system_id, name, active_time, location } = req.body;
+// Create or update user
+app.post('/api/users', async (req, res) => {
+    try {
+        const { system_id, name, location } = req.body;
+        
+        // Try to find existing user
+        let result = await pool.query(
+            'SELECT id FROM users WHERE system_id = $1',
+            [system_id]
+        );
 
-    // Validate required fields
-    if (!system_id || !name) {
-      return res.status(400).json({ 
-        error: 'system_id and name are required fields' 
-      });
+        if (result.rows.length === 0) {
+            // Create new user if doesn't exist
+            result = await pool.query(
+                'INSERT INTO users (system_id, name, location) VALUES ($1, $2, $3) RETURNING id',
+                [system_id, name, location]
+            );
+        }
+
+        res.json({ id: result.rows[0].id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-
-    const query = `
-      INSERT INTO system_metrics (system_id, name, active_time, location)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *;
-    `;
-
-    const values = [
-      system_id || os.hostname(), // Use provided system_id or fallback to hostname
-      name,
-      active_time || '00:00:00',
-      location || 'Unknown'
-    ];
-
-    const result = await pool.query(query, values);
-    res.status(201).json({
-      message: 'Data inserted successfully',
-      data: result.rows[0]
-    });
-
-  } catch (error) {
-    console.error('Error inserting data:', error);
-    res.status(500).json({ 
-      error: 'Failed to insert metrics',
-      details: error.message 
-    });
-  }
 });
 
-// GET endpoint to retrieve metrics
-app.get('/api/metrics', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM system_metrics ORDER BY date_of_entry DESC');
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching metrics:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch metrics',
-      details: error.message 
-    });
-  }
+// Update daily metrics
+app.post('/api/daily-metrics', async (req, res) => {
+    try {
+        const { user_id, active_time, date } = req.body;
+
+        // Update or insert daily metrics
+        const result = await pool.query(`
+            INSERT INTO daily_metrics (user_id, date, total_active_time)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, date) 
+            DO UPDATE SET total_active_time = $3
+            RETURNING *
+        `, [user_id, date, active_time]);
+
+        res.json({ message: 'Metrics updated', data: result.rows[0] });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Get user metrics for a date range
+app.get('/api/metrics/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { start_date, end_date } = req.query;
+
+        const result = await pool.query(`
+            SELECT u.name, u.system_id, u.location, 
+                   dm.date, dm.total_active_time
+            FROM users u
+            JOIN daily_metrics dm ON u.id = dm.user_id
+            WHERE u.id = $1 
+            AND dm.date BETWEEN $2 AND $3
+            ORDER BY dm.date
+        `, [userId, start_date || '1900-01-01', end_date || '2100-12-31']);
+
+        res.json(result.rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
+
+app.listen(3000, () => console.log('Server running on port 3000'));
