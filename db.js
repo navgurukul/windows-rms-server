@@ -12,7 +12,6 @@ const pool = new Pool({
 
 async function insertSystemMetrics() {
   try {
-    // Sample data - you can modify this according to your needs
             const metrics = {
             system_id: os.hostname(), // Gets computer hostname
             name: 'System Name',
@@ -31,7 +30,7 @@ async function insertSystemMetrics() {
       metrics.name,
       metrics.active_time,
       metrics.location
-    ];
+    ];  
 
     const result = await pool.query(query, values);
     console.log('Data inserted successfully:', result.rows[0]);
