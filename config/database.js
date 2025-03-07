@@ -15,10 +15,12 @@ async function initializeDatabase() {
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS devices (
-                id SERIAL PRIMARY KEY,
-                hostname VARCHAR(255) NOT NULL,
-                device_name VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+               id SERIAL PRIMARY KEY,
+              username VARCHAR(255) NOT NULL,
+              serial_number VARCHAR(50) NOT NULL UNIQUE,
+              mac_address VARCHAR(50) NOT NULL,
+              location VARCHAR(255) NOT NULL,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
@@ -35,19 +37,16 @@ async function initializeDatabase() {
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS metrics (
-                id SERIAL PRIMARY KEY,
-                client_id VARCHAR(255) NOT NULL,
-                system_id VARCHAR(255) NOT NULL,
-                timestamp TIMESTAMP NOT NULL,
-                session_start TIMESTAMP NOT NULL,
-                session_duration INTEGER NOT NULL,
-                hostname VARCHAR(255) NOT NULL,
-                computer_name VARCHAR(255),
-                domain VARCHAR(255),
-                memory_usage DECIMAL,
-                cpu_load DECIMAL,
-                metrics_data JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+         id SERIAL PRIMARY KEY,
+        system_id VARCHAR(255) NOT NULL,
+        mac_address VARCHAR(50) NOT NULL,
+        serial_number VARCHAR(50) NOT NULL,
+        username VARCHAR(255) NOT NULL,
+        total_active_time INTEGER NOT NULL,
+        latitude DECIMAL(9,6),
+        longitude DECIMAL(9,6),
+        location_name VARCHAR(255),
+        timestamp TIMESTAMP NOT NULL
             )
         `);
 
