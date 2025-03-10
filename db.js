@@ -12,12 +12,12 @@ const pool = new Pool({
 
 async function insertSystemMetrics() {
   try {
-            const metrics = {
-            system_id: os.hostname(), // Gets computer hostname
-            name: 'System Name',
-            active_time: '02:00:00', // Format: HH:MM:SS
-            location: 'Office'
-            };
+    const metrics = {
+      system_id: os.hostname(), // Gets computer hostname
+      name: 'System Name',
+      active_time: '02:00:00', // Format: HH:MM:SS
+      location: 'Office'
+    };
 
     const query = `
       INSERT INTO system_metrics (system_id, name, active_time, location)
@@ -30,7 +30,7 @@ async function insertSystemMetrics() {
       metrics.name,
       metrics.active_time,
       metrics.location
-    ];  
+    ];
 
     const result = await pool.query(query, values);
     console.log('Data inserted successfully:', result.rows[0]);

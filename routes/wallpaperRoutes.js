@@ -1,8 +1,11 @@
 const express = require('express');
-const WallpaperController = require('../controllers/wallpaperController');
-
 const router = express.Router();
+const { getWallpaper, updateWallpaper } = require('../controllers/wallpaperController');
 
-router.post('/', WallpaperController.addWallpaper);
+// GET endpoint to retrieve the current wallpaper URL
+router.get('/wallpaper', getWallpaper);
 
-module.exports = router;    
+// POST endpoint to update the wallpaper URL
+router.post('/wallpaper', updateWallpaper);
+
+module.exports = router;

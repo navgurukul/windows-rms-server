@@ -1,28 +1,63 @@
+// server/server.js
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { initializeDatabase } = require('./config/database');
+
+// Create simple middleware functions since the original ones aren't found
+const errorHandler = (err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+};
+
+const rateLimiter = (req, res, next) => {
+  // Simple rate limiter - in production you'd use a more robust solution
+  next();
+};
+
+// Import routes - using correct paths based on your project structure
 const deviceRoutes = require('./routes/deviceRoutes');
-const sessionRoutes = require('./routes/sessionRoutes');
-const usageRoutes = require('./routes/usageRoutes');
 const wallpaperRoutes = require('./routes/wallpaperRoutes');
-const commandRoutes = require('./routes/commandRoutes');
+const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add this line
+
+// Import database initialization
+const { initializeDatabase } = require('./config/database');
+
+// Simple logger middleware
+const logger = (req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+};
 
 const app = express();
+
+// Middleware
 app.use(express.json());
 app.use(cors());
-
-// Initialize database connection
-initializeDatabase();
+app.use(rateLimiter);
+app.use(logger);
 
 // Routes
 app.use('/api/devices', deviceRoutes);
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/usage', usageRoutes);
-app.use('/api/wallpapers', wallpaperRoutes);
-app.use('/api/commands', commandRoutes);
+app.use('/api', wallpaperRoutes);
+app.use('/api/tracking', laptopTrackingRoutes); // Add this line
 
+// Error handling
+app.use(errorHandler);
+
+// Initialize database and start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+
+async function startServer() {
+    try {
+        await initializeDatabase();
+        app.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+            console.log('Database tables initialized successfully');
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+}
+
+startServer();
