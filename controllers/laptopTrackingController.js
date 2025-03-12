@@ -258,8 +258,159 @@ const getDailyUsage = async (req, res) => {
     }
 };
 
+/**
+ * Get all laptop tracking data with optional filtering by date range
+ */
+const getAllData = async (req, res) => {
+    try {
+        const { start_date, end_date } = req.query;
+        
+        let query = `
+            SELECT 
+                id,
+                DATE(timestamp) as date,
+                system_id,
+                mac_address,
+                serial_number,
+                username,
+                total_active_time as total_time,
+                timestamp as last_updated,
+                latitude,
+                longitude,
+                location_name
+            FROM laptop_tracking
+        `;
+        
+        const queryParams = [];
+        
+        // Add date filtering if provided
+        if (start_date || end_date) {
+            query += ' WHERE';
+            
+            if (start_date) {
+                query += ` DATE(timestamp) >= $${queryParams.length + 1}`;
+                queryParams.push(start_date);
+            }
+            
+            if (end_date) {
+                if (start_date) query += ' AND';
+                query += ` DATE(timestamp) <= $${queryParams.length + 1}`;
+                queryParams.push(end_date);
+            }
+        }
+        
+        query += ` ORDER BY date DESC, system_id, username`;
+        
+        const result = await pool.query(query, queryParams);
+        
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error fetching all laptop tracking data:', error);
+        res.status(500).json({ error: 'Failed to fetch laptop tracking data' });
+    }
+};
+
+/**
+ * Get laptop tracking data for a specific system ID
+ */
+const getSystemData = async (req, res) => {
+    try {
+        const { system_id } = req.params;
+        const { start_date, end_date } = req.query;
+        
+        let query = `
+            SELECT 
+                id,
+                DATE(timestamp) as date,
+                system_id,
+                mac_address,
+                serial_number,
+                username,
+                total_active_time as total_time,
+                timestamp as last_updated,
+                latitude,
+                longitude,
+                location_name
+            FROM laptop_tracking
+            WHERE system_id = $1
+        `;
+        
+        const queryParams = [system_id];
+        
+        if (start_date) {
+            query += ` AND DATE(timestamp) >= $${queryParams.length + 1}`;
+            queryParams.push(start_date);
+        }
+        
+        if (end_date) {
+            query += ` AND DATE(timestamp) <= $${queryParams.length + 1}`;
+            queryParams.push(end_date);
+        }
+        
+        query += ` ORDER BY date DESC, username`;
+        
+        const result = await pool.query(query, queryParams);
+        
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error fetching system data:', error);
+        res.status(500).json({ error: 'Failed to fetch system data' });
+    }
+};
+
+/**
+ * Get laptop tracking data for a specific serial number
+ */
+const getSerialNumberData = async (req, res) => {
+    try {
+        const { serial_number } = req.params;
+        const { start_date, end_date } = req.query;
+        
+        let query = `
+            SELECT 
+                id,
+                DATE(timestamp) as date,
+                system_id,
+                mac_address,
+                serial_number,
+                username,
+                total_active_time as total_time,
+                timestamp as last_updated,
+                latitude,
+                longitude,
+                location_name
+            FROM laptop_tracking
+            WHERE serial_number = $1
+        `;
+        
+        const queryParams = [serial_number];
+        
+        if (start_date) {
+            query += ` AND DATE(timestamp) >= $${queryParams.length + 1}`;
+            queryParams.push(start_date);
+        }
+        
+        if (end_date) {
+            query += ` AND DATE(timestamp) <= $${queryParams.length + 1}`;
+            queryParams.push(end_date);
+        }
+        
+        query += ` ORDER BY date DESC`;
+        
+        const result = await pool.query(query, queryParams);
+        
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error fetching serial number data:', error);
+        res.status(500).json({ error: 'Failed to fetch serial number data' });
+    }
+};
+
 module.exports = {
     syncLaptopData,
     bulkSyncLaptopData,
-    getDailyUsage
-};
+    getDailyUsage,
+    getAllData,
+    getSystemData,
+    getSerialNumberData
+};  
