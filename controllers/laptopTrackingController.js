@@ -13,34 +13,51 @@ const syncLaptopData = async (req, res) => {
             mac_address, 
             serial_number, 
             active_time, // Time in seconds for this session
+            total_time, // Optional: total time if aggregated on client
             latitude, 
             longitude, 
-            location_name 
+            location_name,
+            timestamp // Optional: specific timestamp for this record
         } = req.body;
         
         // Validate required fields
-        if (!username || !system_id || !mac_address || !serial_number || active_time === undefined) {
+        if (!username || !system_id || !mac_address || !serial_number || 
+            (active_time === undefined && total_time === undefined)) {
             return res.status(400).json({ 
-                error: 'Missing required fields. Required: username, system_id, mac_address, serial_number, active_time' 
+                error: 'Missing required fields. Required: username, system_id, mac_address, serial_number, and either active_time or total_time' 
             });
         }
 
-        // Get today's date (UTC midnight)
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Get the date to use for aggregation (UTC midnight)
+        // Use provided timestamp or current time
+        const recordDate = timestamp ? new Date(timestamp) : new Date();
+        recordDate.setHours(0, 0, 0, 0);
+        
+        // Get the actual timestamp to record (now or provided)
+        const actualTimestamp = timestamp ? new Date(timestamp) : new Date();
         
         // Check if an entry already exists for this user/system/day
         const existingEntry = await pool.query(
             `SELECT id, total_active_time FROM laptop_tracking 
              WHERE username = $1 AND system_id = $2 AND 
              DATE(timestamp) = $3`,
-            [username, system_id, today]
+            [username, system_id, recordDate]
         );
         
         if (existingEntry.rows.length > 0) {
-            // Update existing entry by adding the new active time
+            // Update existing entry
             const currentEntry = existingEntry.rows[0];
-            const updatedTime = parseInt(currentEntry.total_active_time) + parseInt(active_time);
+            let updatedTime;
+            
+            if (total_time !== undefined) {
+                // If total_time is provided, use the larger value
+                const currentTime = parseInt(currentEntry.total_active_time);
+                const newTotalTime = parseInt(total_time);
+                updatedTime = newTotalTime > currentTime ? newTotalTime : currentTime;
+            } else {
+                // Otherwise add the active_time to the existing total
+                updatedTime = parseInt(currentEntry.total_active_time) + parseInt(active_time);
+            }
             
             await pool.query(
                 `UPDATE laptop_tracking 
@@ -48,9 +65,9 @@ const syncLaptopData = async (req, res) => {
                      latitude = $2, 
                      longitude = $3, 
                      location_name = $4, 
-                     timestamp = NOW()
-                 WHERE id = $5`,
-                [updatedTime, latitude || null, longitude || null, location_name || null, currentEntry.id]
+                     timestamp = $5
+                 WHERE id = $6`,
+                [updatedTime, latitude || null, longitude || null, location_name || null, actualTimestamp, currentEntry.id]
             );
             
             return res.status(200).json({
@@ -64,17 +81,18 @@ const syncLaptopData = async (req, res) => {
                 `INSERT INTO laptop_tracking 
                  (system_id, mac_address, serial_number, username, total_active_time, 
                   latitude, longitude, location_name, timestamp)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id, total_active_time`,
                 [
                     system_id, 
                     mac_address, 
                     serial_number, 
                     username, 
-                    active_time, 
+                    total_time !== undefined ? total_time : active_time, // Use total_time if provided, otherwise active_time
                     latitude || null, 
                     longitude || null, 
-                    location_name || null
+                    location_name || null,
+                    actualTimestamp
                 ]
             );
             
@@ -91,7 +109,7 @@ const syncLaptopData = async (req, res) => {
 };
 
 /**
- * Bulk sync multiple records from client SQLite database
+ * Bulk sync multiple records from client
  */
 const bulkSyncLaptopData = async (req, res) => {
     const client = await pool.connect();
@@ -112,29 +130,55 @@ const bulkSyncLaptopData = async (req, res) => {
         for (const record of records) {
             // Validate required fields
             if (!record.username || !record.system_id || !record.mac_address || 
-                !record.serial_number || record.total_active_time === undefined) {
+                !record.serial_number || record.total_time === undefined) {
                 continue; // Skip invalid records
             }
             
-            // Format timestamp or use current time
-            const timestamp = record.timestamp ? new Date(record.timestamp) : new Date();
+            // Parse the date if it's provided, otherwise use current date
+            let recordDate;
+            if (record.date) {
+                recordDate = new Date(record.date);
+            } else if (record.last_updated) {
+                recordDate = new Date(record.last_updated);
+                recordDate.setHours(0, 0, 0, 0); // Set to midnight
+            } else {
+                recordDate = new Date();
+                recordDate.setHours(0, 0, 0, 0); // Set to midnight
+            }
             
-            // Get the date portion for daily aggregation
-            const recordDate = new Date(timestamp);
-            recordDate.setHours(0, 0, 0, 0);
+            // Format for database comparison (YYYY-MM-DD)
+            const dateStr = recordDate.toISOString().split('T')[0];
             
             // Check if an entry already exists for this day/system/user combination
             const existingEntry = await client.query(
                 `SELECT id, total_active_time FROM laptop_tracking 
                  WHERE username = $1 AND system_id = $2 AND 
                  DATE(timestamp) = $3`,
-                [record.username, record.system_id, recordDate]
+                [record.username, record.system_id, dateStr]
             );
             
+            // Get the latest location data and timestamp
+            const latitude = record.latitude || null;
+            const longitude = record.longitude || null;
+            const location_name = record.location_name || null;
+            
+            // Use the provided last_updated timestamp or the current time
+            let timestamp;
+            if (record.last_updated) {
+                timestamp = new Date(record.last_updated);
+            } else {
+                timestamp = new Date();
+            }
+            
             if (existingEntry.rows.length > 0) {
-                // Update existing entry - ADD to the existing time, not replace it
+                // Update existing entry
                 const currentEntry = existingEntry.rows[0];
-                const updatedTime = parseInt(currentEntry.total_active_time) + parseInt(record.total_active_time);
+                
+                // If we received a total_time that's larger than what we already have, use it
+                // Otherwise, use our existing value (don't decrease usage time)
+                const currentTime = parseInt(currentEntry.total_active_time);
+                const newTime = parseInt(record.total_time);
+                const updatedTime = newTime > currentTime ? newTime : currentTime;
                 
                 const updateResult = await client.query(
                     `UPDATE laptop_tracking 
@@ -147,9 +191,9 @@ const bulkSyncLaptopData = async (req, res) => {
                      RETURNING id, total_active_time`,
                     [
                         updatedTime, 
-                        record.latitude || null, 
-                        record.longitude || null, 
-                        record.location_name || null, 
+                        latitude, 
+                        longitude, 
+                        location_name, 
                         timestamp, 
                         currentEntry.id
                     ]
@@ -159,7 +203,7 @@ const bulkSyncLaptopData = async (req, res) => {
                     action: 'updated',
                     id: updateResult.rows[0].id,
                     total_active_time: updateResult.rows[0].total_active_time,
-                    date: recordDate.toISOString().split('T')[0],
+                    date: dateStr,
                     system_id: record.system_id
                 });
             } else {
@@ -175,10 +219,10 @@ const bulkSyncLaptopData = async (req, res) => {
                         record.mac_address,
                         record.serial_number,
                         record.username,
-                        record.total_active_time,
-                        record.latitude || null,
-                        record.longitude || null,
-                        record.location_name || null,
+                        record.total_time, // Use the provided total_time directly
+                        latitude,
+                        longitude,
+                        location_name,
                         timestamp
                     ]
                 );
@@ -187,7 +231,7 @@ const bulkSyncLaptopData = async (req, res) => {
                     action: 'inserted',
                     id: insertResult.rows[0].id,
                     total_active_time: insertResult.rows[0].total_active_time,
-                    date: recordDate.toISOString().split('T')[0],
+                    date: dateStr,
                     system_id: record.system_id
                 });
             }
@@ -413,4 +457,4 @@ module.exports = {
     getAllData,
     getSystemData,
     getSerialNumberData
-};  
+};
