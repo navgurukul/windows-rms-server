@@ -132,7 +132,7 @@ const bulkSyncLaptopData = async (req, res) => {
             );
             
             if (existingEntry.rows.length > 0) {
-                // Update existing entry
+                // Update existing entry - ADD to the existing time, not replace it
                 const currentEntry = existingEntry.rows[0];
                 const updatedTime = parseInt(currentEntry.total_active_time) + parseInt(record.total_active_time);
                 
@@ -226,8 +226,11 @@ const getDailyUsage = async (req, res) => {
                 DATE(timestamp) as date,
                 system_id,
                 serial_number,
-                SUM(total_active_time) as total_time,
-                MAX(timestamp) as last_updated
+                total_active_time as total_time,
+                timestamp as last_updated,
+                latitude,
+                longitude,
+                location_name
             FROM laptop_tracking
             WHERE username = $1
         `;
@@ -244,8 +247,7 @@ const getDailyUsage = async (req, res) => {
             queryParams.push(end_date);
         }
         
-        query += ` GROUP BY DATE(timestamp), system_id, serial_number
-                   ORDER BY date DESC, system_id`;
+        query += ` ORDER BY date DESC, system_id`;
         
         const result = await pool.query(query, queryParams);
         
