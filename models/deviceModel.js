@@ -2,10 +2,14 @@
 const { pool } = require('../config/database');
 
 const DeviceModel = {
-    create: async (hostname, device_name) => {
+    create: async (username, serial_number, mac_address, location) => {
+        const deviceExists = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
+        if (deviceExists.rows.length > 0) {
+            return deviceExists.rows[0];
+        }
         const result = await pool.query(
-            'INSERT INTO devices (hostname, device_name) VALUES ($1, $2) RETURNING *',
-            [hostname, device_name]
+            'INSERT INTO devices (username, serial_number, mac_address, location) VALUES ($1, $2, $3, $4) RETURNING *',
+            [username, serial_number, mac_address, location]
         );
         return result.rows[0];
     },

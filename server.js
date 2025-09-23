@@ -16,11 +16,12 @@ const rateLimiter = (req, res, next) => {
 
 // Import routes - using correct paths based on your project structure
 const deviceRoutes = require('./routes/deviceRoutes');
+const softwareRoutes = require('./routes/softwareRoutes');
 const wallpaperRoutes = require('./routes/wallpaperRoutes');
 const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add this line
 
 // Import database initialization
-const { initializeDatabase } = require('./config/database');
+const { initializeDatabase, createSoftwareSeeder } = require('./config/database');
 
 // Simple logger middleware
 const logger = (req, res, next) => {
@@ -38,6 +39,7 @@ app.use(logger);
 
 // Routes
 app.use('/api/devices', deviceRoutes);
+app.use('/api/softwares', softwareRoutes);
 app.use('/api', wallpaperRoutes);
 app.use('/api/tracking', laptopTrackingRoutes); // Add this line
 
@@ -50,6 +52,7 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
     try {
         await initializeDatabase();
+        await createSoftwareSeeder();
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);
             console.log('Database tables initialized successfully');
