@@ -1,6 +1,11 @@
 
 const { pool } = require('../config/database');
 
+const fetchDeviceIdFromSerialNumber = async (serial_number) => {
+    const fetchDeviceId = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
+    return fetchDeviceId.rows[0].id;
+};
+
 const DeviceModel = {
     create: async (username, serial_number, mac_address, location) => {
         const deviceExists = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
@@ -22,7 +27,9 @@ const DeviceModel = {
     getAll: async () => {
         const result = await pool.query('SELECT * FROM devices');
         return result.rows;
-    }
+    },
+
+    fetchDeviceIdFromSerialNumber
 };
 
 module.exports = DeviceModel;

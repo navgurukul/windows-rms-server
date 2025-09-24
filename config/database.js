@@ -24,19 +24,16 @@ async function initializeDatabase() {
                 )
             `);
 
-
         await pool.query(`
                 CREATE TABLE IF NOT EXISTS laptop_tracking(
                 id SERIAL PRIMARY KEY,
-                system_id VARCHAR(255) NOT NULL,
-                mac_address VARCHAR(50) NOT NULL,
-                serial_number VARCHAR(50) NOT NULL,
-                username VARCHAR(255) NOT NULL,
+                device_id INTEGER NOT NULL,
                 total_active_time INTEGER NOT NULL,
                 latitude DECIMAL(9,6),
                 longitude DECIMAL(9,6),
                 location_name VARCHAR(255),
-                timestamp TIMESTAMP NOT NULL
+                timestamp TIMESTAMP NOT NULL,
+                FOREIGN KEY (device_id) REFERENCES devices(id)
                 )
             `);
 
@@ -48,6 +45,7 @@ async function initializeDatabase() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             `);
+
         await pool.query(`
                 CREATE TABLE IF NOT EXISTS softwares_installed (
                 id SERIAL PRIMARY KEY,
