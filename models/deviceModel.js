@@ -3,7 +3,7 @@ const { pool } = require('../config/database');
 
 const fetchDeviceIdFromSerialNumber = async (serial_number) => {
     const fetchDeviceId = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
-    return fetchDeviceId.rows[0].id;
+    return fetchDeviceId?.rows[0]?.id || null;
 };
 
 const DeviceModel = {

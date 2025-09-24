@@ -134,6 +134,9 @@ const bulkSyncLaptopData = async (req, res) => {
                 continue; // Skip invalid records
             }
             const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(record.serial_number);
+            if (!device_id) {
+                continue; // Skip invalid records
+            }
             // Parse the date if it's provided, otherwise use current date
             let recordDate;
             if (record.date) {
@@ -153,7 +156,7 @@ const bulkSyncLaptopData = async (req, res) => {
             const existingEntry = await client.query(
                 `SELECT id, total_active_time FROM laptop_tracking 
                  WHERE device_id = $1 AND 
-                 DATE(timestamp) = $3`,
+                 DATE(timestamp) = $2`,
                 [device_id, dateStr]
             );
 
