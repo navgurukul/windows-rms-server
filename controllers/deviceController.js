@@ -25,6 +25,18 @@ const DeviceController = {
             console.error('Error fetching devices:', error);
             return res.status(500).json({ error: 'Failed to fetch devices' });
         }
+    },
+
+    getDeviceBySerialNumber: async (req, res) => {
+        try {
+            const { serial_number } = req.params;
+            const device = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+            return res.json(device);
+        }
+        catch (error) {
+            console.error('Error fetching device by serial number:', error);
+            return res.status(500).json({ error: 'Failed to fetch device by serial number' });
+        }
     }
 };
 

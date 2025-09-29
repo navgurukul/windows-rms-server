@@ -30,7 +30,9 @@ const syncLaptopData = async (req, res) => {
         }
 
         const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
-
+        if (!device_id) {
+            return res.status(400).json({ error: 'Device not found' });
+        }
         // Get the date to use for aggregation (UTC midnight)
         // Use provided timestamp or current time
         const recordDate = timestamp ? new Date(timestamp) : new Date();
