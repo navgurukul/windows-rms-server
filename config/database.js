@@ -71,7 +71,7 @@ async function createSoftwareSeeder() {
             return;
         }
         await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['obs-studio.portable']);
-        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['brave --version=1.1.21']);
+        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['brave']);
     } catch (error) {
         console.error('Error creating software seeder:', error);
         throw error;
