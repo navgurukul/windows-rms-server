@@ -72,6 +72,10 @@ async function createSoftwareSeeder() {
         }
         await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['obs-studio.portable']);
         await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['brave']);
+        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['atom']);
+        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['flux']);
+        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['everything']);
+        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['discord']);
     } catch (error) {
         console.error('Error creating software seeder:', error);
         throw error;
