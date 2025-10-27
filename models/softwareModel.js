@@ -33,7 +33,10 @@ const SoftwareModel = {
             return true;
         });
 
-        return result.map(s => s.software_name);
+        return result.map(s => ({
+            software_name: s.software_name,
+            winget_id: s.winget_id
+        }));
     },
 
     addHistory: async (serial_number, software_name, isSuccessful) => {
