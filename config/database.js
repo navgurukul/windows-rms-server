@@ -41,6 +41,7 @@ async function initializeDatabase() {
                 CREATE TABLE IF NOT EXISTS softwares (
                 id SERIAL PRIMARY KEY,
                 software_name VARCHAR(255) NOT NULL,
+                winget_id VARCHAR(255) NOT NULL,
                 isActive BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -70,9 +71,9 @@ async function createSoftwareSeeder() {
         if (softwareExists.rows.length > 0) {
             return;
         }
-        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['obs-studio.portable']);
-        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['brave']);
-        await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['atom']);
+        await pool.query('INSERT INTO softwares (software_name, winget_id) VALUES ($1, $2)', ['obs-studio', 'OBSProject.OBSStudio']);
+        await pool.query('INSERT INTO softwares (software_name, winget_id) VALUES ($1, $2)', ['brave', 'Brave.Brave']);
+        await pool.query('INSERT INTO softwares (software_name, winget_id) VALUES ($1, $2)', ['vlc', 'VideoLAN.VLC']);
         // await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['flux']);
         // await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['everything']);
         // await pool.query('INSERT INTO softwares (software_name) VALUES ($1)', ['discord']);
