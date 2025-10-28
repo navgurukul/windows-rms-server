@@ -16,6 +16,7 @@ const rateLimiter = (req, res, next) => {
 
 // Import routes - using correct paths based on your project structure
 const deviceRoutes = require('./routes/deviceRoutes');
+const logsRoutes = require('./routes/logsRoutes');
 const softwareRoutes = require('./routes/softwareRoutes');
 const wallpaperRoutes = require('./routes/wallpaperRoutes');
 const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add this line
@@ -38,10 +39,11 @@ app.use(rateLimiter);
 app.use(logger);
 
 // Routes
+app.use('/api', wallpaperRoutes);
+app.use('/api/logs', logsRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/softwares', softwareRoutes);
-app.use('/api', wallpaperRoutes);
-app.use('/api/tracking', laptopTrackingRoutes); // Add this line
+app.use('/api/tracking', laptopTrackingRoutes);
 
 // Error handling
 app.use(errorHandler);
