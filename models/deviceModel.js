@@ -18,15 +18,20 @@ const DeviceModel = {
         );
         return result.rows[0];
     },
-    
+
     getById: async (id) => {
         const result = await pool.query('SELECT * FROM devices WHERE id = $1', [id]);
         return result.rows[0];
     },
-    
+
     getAll: async () => {
         const result = await pool.query('SELECT * FROM devices');
         return result.rows;
+    },
+
+    updateDeviceStatus: async (deviceId, isActive) => {
+        const result = await pool.query('UPDATE devices SET isActive = $1 WHERE id = $2', [isActive, deviceId]);
+        return result.rows[0];
     },
 
     fetchDeviceIdFromSerialNumber

@@ -20,6 +20,7 @@ async function initializeDatabase() {
                 serial_number VARCHAR(50) NOT NULL UNIQUE,  
                 mac_address VARCHAR(50) NOT NULL,
                 location VARCHAR(255) NOT NULL,
+                isActive BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             `);
