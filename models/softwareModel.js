@@ -41,6 +41,10 @@ const SoftwareModel = {
 
     addHistory: async (serial_number, software_name, isSuccessful) => {
         const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+        if (!device_id) {
+            console.error('Device not found for serial number:', serial_number);
+            return null;
+        }
         const result = await pool.query('INSERT INTO softwares_installed (device_id, software_name, isSuccessful) VALUES ($1, $2, $3) RETURNING *', [device_id, software_name, isSuccessful]);
         return result.rows[0];
     },

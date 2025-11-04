@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
+const rateLimit = require('express-rate-limit');
 
 // Create simple middleware functions since the original ones aren't found
 const errorHandler = (err, req, res, next) => {
@@ -10,7 +11,26 @@ const errorHandler = (err, req, res, next) => {
 };
 
 const rateLimiter = (req, res, next) => {
-  // Simple rate limiter - in production you'd use a more robust solution
+  // Production-grade rate limiter using 'express-rate-limit'
+
+  // Configure rate limiter: 100 requests per minute per IP
+  const limiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 100, // limit each IP to 100 requests per windowMs
+    keyGenerator: (req, res) => {
+      // Prefer x-forwarded-for for real client IPs behind proxies
+      const forwarded = req.headers['x-forwarded-for'];
+      return forwarded ? forwarded.split(",")[0].trim() : req.ip;
+    },
+    handler: (req, res, next) => {
+      res.status(429).json({ error: 'Too many requests. Please try again later.' });
+    },
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  });
+
+  // Use as middleware
+  return limiter(req, res, next);
   next();
 };
 
