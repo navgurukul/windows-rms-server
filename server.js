@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 // Create simple middleware functions since the original ones aren't found
 const errorHandler = (err, req, res, next) => {
@@ -10,29 +10,15 @@ const errorHandler = (err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 };
 
-const rateLimiter = (req, res, next) => {
-  // Production-grade rate limiter using 'express-rate-limit'
-
-  // Configure rate limiter: 100 requests per minute per IP
-  const limiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 100, // limit each IP to 100 requests per windowMs
-    keyGenerator: (req, res) => {
-      // Prefer x-forwarded-for for real client IPs behind proxies
-      const forwarded = req.headers['x-forwarded-for'];
-      return forwarded ? forwarded.split(",")[0].trim() : req.ip;
-    },
-    handler: (req, res, next) => {
-      res.status(429).json({ error: 'Too many requests. Please try again later.' });
-    },
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  });
-
-  // Use as middleware
-  return limiter(req, res, next);
-  next();
-};
+// Configure rate limiter ONCE at app initialization
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // limit each IP to 100 requests per windowMs
+  keyGenerator: ipKeyGenerator, // IPv4/IPv6 safe helper from the library
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' }
+});
 
 // Import routes - using correct paths based on your project structure
 const deviceRoutes = require('./routes/deviceRoutes');
@@ -55,7 +41,9 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(cors());
-app.use(rateLimiter);
+// If behind a proxy/load balancer, enable correct client IP resolution
+app.set('trust proxy', true);
+app.use(limiter);
 app.use(logger);
 
 // Routes

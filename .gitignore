@@ -12,3 +12,4 @@ coverage/
 *.tgz
 *.zip
 .vscode/
+clientLogs/
