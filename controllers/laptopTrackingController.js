@@ -433,19 +433,19 @@ const getSerialNumberData = async (req, res) => {
 
         let query = `
             SELECT 
-                id,
-                DATE(timestamp) as date,
-                system_id,
-                mac_address,
-                serial_number,
-                username,
-                total_active_time as total_time,
-                timestamp as last_updated,
-                latitude,
-                longitude,
-                location_name
-            FROM laptop_tracking
-            WHERE serial_number = $1
+                lt.id,
+                DATE(lt.timestamp) as date,
+                d.username,
+                d.serial_number,
+                d.mac_address,
+                lt.total_active_time as total_time,
+                lt.timestamp as last_updated,
+                lt.latitude,
+                lt.longitude,
+                lt.location_name
+            FROM laptop_tracking lt
+            JOIN devices d ON lt.device_id = d.id
+            WHERE d.serial_number = $1
         `;
 
         const queryParams = [serial_number];
