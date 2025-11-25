@@ -2,7 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 
 // Create simple middleware functions since the original ones aren't found
 const errorHandler = (err, req, res, next) => {
@@ -14,10 +14,10 @@ const errorHandler = (err, req, res, next) => {
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 100, // limit each IP to 100 requests per windowMs
-  keyGenerator: ipKeyGenerator, // IPv4/IPv6 safe helper from the library
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again later.' }
+  message: { error: 'Too many requests. Please try again later.' },
+  validate: { trustProxy: false } // Disable validation since we're intentionally behind a proxy
 });
 
 // Import routes - using correct paths based on your project structure
@@ -60,17 +60,17 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 3000;
 
 async function startServer() {
-    try {
-        await initializeDatabase();
-        await createSoftwareSeeder();
-        app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
-            console.log('Database tables initialized successfully');
-        });
-    } catch (error) {
-        console.error('Failed to start server:', error);
-        process.exit(1);
-    }
+  try {
+    await initializeDatabase();
+    await createSoftwareSeeder();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log('Database tables initialized successfully');
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
 }
 
 startServer();
