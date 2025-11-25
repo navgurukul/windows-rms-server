@@ -48,6 +48,19 @@ const SoftwareModel = {
         const result = await pool.query('INSERT INTO softwares_installed (device_id, software_name, isSuccessful) VALUES ($1, $2, $3) RETURNING *', [device_id, software_name, isSuccessful]);
         return result.rows[0];
     },
+
+    getInstallationHistory: async (serial_number) => {
+        const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+        if (!device_id) {
+            console.error('Device not found for serial number:', serial_number);
+            return [];
+        }
+        const result = await pool.query(
+            'SELECT * FROM softwares_installed WHERE device_id = $1 ORDER BY created_at DESC',
+            [device_id]
+        );
+        return result.rows;
+    },
 };
 
 module.exports = SoftwareModel;

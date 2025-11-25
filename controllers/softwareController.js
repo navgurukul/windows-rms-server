@@ -24,6 +24,21 @@ const SoftwareController = {
             res.status(500).json({ error: 'Failed to add history' });
         }
     },
+
+    getInstallationHistory: async (req, res) => {
+        try {
+            const { serial_number } = req.params;
+            if (!serial_number) {
+                return res.status(400).json({ error: 'Serial number is required' });
+            }
+            const history = await SoftwareModel.getInstallationHistory(serial_number);
+            res.json(history);
+        }
+        catch (error) {
+            console.error('Error fetching installation history:', error);
+            res.status(500).json({ error: 'Failed to fetch installation history' });
+        }
+    },
 };
 
 module.exports = SoftwareController;
