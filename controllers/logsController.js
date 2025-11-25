@@ -26,7 +26,7 @@ const LogsController = {
                 ? logs.map(l => {
                     if (typeof l === 'string') return l;
                     try { return JSON.stringify(l); } catch { return String(l); }
-                  }).join("\n") + "\n"
+                }).join("\n") + "\n"
                 : '';
 
             if (lines.length > 0) {
@@ -45,14 +45,98 @@ const LogsController = {
                         if (now - stat.mtimeMs > maxAgeMs) {
                             fs.unlinkSync(full);
                         }
-                    } catch {}
+                    } catch { }
                 }
-            } catch {}
+            } catch { }
 
             res.sendStatus(200);
         } catch (e) {
             console.error('Failed to save client logs:', e);
             res.status(500).json({ error: 'Failed to save client logs' });
+        }
+    },
+
+    getLogFiles: async (req, res) => {
+        try {
+            const { serial_number } = req.query;
+            const baseDir = path.join(__dirname, "..", "clientLogs");
+
+            // Ensure directory exists
+            if (!fs.existsSync(baseDir)) {
+                return res.json([]);
+            }
+
+            // Read all files from clientLogs
+            const files = fs.readdirSync(baseDir);
+            const logFiles = [];
+
+            for (const filename of files) {
+                // Filter by serial number if provided
+                if (serial_number && !filename.startsWith(serial_number)) {
+                    continue;
+                }
+
+                const filePath = path.join(baseDir, filename);
+                try {
+                    const stat = fs.statSync(filePath);
+                    if (stat.isFile()) {
+                        logFiles.push({
+                            filename: filename,
+                            size: stat.size,
+                            modified: stat.mtime,
+                            type: 'client'
+                        });
+                    }
+                } catch (e) {
+                    console.error(`Error reading file stats for ${filename}:`, e);
+                }
+            }
+
+            // Sort by modified date, newest first
+            logFiles.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+
+            res.json(logFiles);
+        } catch (e) {
+            console.error('Failed to list log files:', e);
+            res.status(500).json({ error: 'Failed to list log files' });
+        }
+    },
+
+    readLogFile: async (req, res) => {
+        try {
+            const { filename } = req.params;
+            const { lines, from } = req.query;
+
+            // Security: prevent path traversal
+            if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+                return res.status(400).json({ error: 'Invalid filename' });
+            }
+
+            const baseDir = path.join(__dirname, "..", "clientLogs");
+            const filePath = path.join(baseDir, filename);
+
+            // Check if file exists
+            if (!fs.existsSync(filePath)) {
+                return res.status(404).json({ error: 'Log file not found' });
+            }
+
+            // Read file contents
+            const content = fs.readFileSync(filePath, 'utf-8');
+
+            // Handle line-based pagination if requested
+            if (lines || from) {
+                const allLines = content.split('\n');
+                const startLine = from ? parseInt(from) : 0;
+                const numLines = lines ? parseInt(lines) : allLines.length;
+                const selectedLines = allLines.slice(startLine, startLine + numLines);
+                return res.type('text/plain').send(selectedLines.join('\n'));
+            }
+
+            // Return full content
+            res.type('text/plain').send(content);
+        } catch (e) {
+            console.error('Failed to read log file:', e);
+            res.status(500).json({ error: 'Failed to read log file' });
         }
     },
 };
