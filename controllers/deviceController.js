@@ -30,7 +30,12 @@ const DeviceController = {
     getDeviceBySerialNumber: async (req, res) => {
         try {
             const { serial_number } = req.params;
-            const device = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+            const device = await DeviceModel.getBySerialNumber(serial_number);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
             return res.status(200).json(device);
         }
         catch (error) {

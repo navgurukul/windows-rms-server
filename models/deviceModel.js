@@ -34,6 +34,11 @@ const DeviceModel = {
         return result.rows[0];
     },
 
+    getBySerialNumber: async (serial_number) => {
+        const result = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
+        return result.rows[0] || null;
+    },
+
     fetchDeviceIdFromSerialNumber
 };
 
