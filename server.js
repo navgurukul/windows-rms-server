@@ -46,6 +46,9 @@ app.set('trust proxy', true);
 app.use(limiter);
 app.use(logger);
 
+// Serve wallpapers directory as static files
+app.use('/wallpapers', express.static('wallpapers'));
+
 // Routes
 app.use('/api', wallpaperRoutes);
 app.use('/api/logs', logsRoutes);
