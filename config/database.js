@@ -62,6 +62,17 @@ async function initializeDatabase() {
                 )
             `);
 
+        // Create wallpapers table
+        await pool.query(`
+                CREATE TABLE IF NOT EXISTS wallpapers (
+                id SERIAL PRIMARY KEY,
+                wallpaper_url VARCHAR(500) NOT NULL,
+                is_active BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+
         console.log('Database tables initialized successfully');
     } catch (error) {
         console.error('Error initializing database:', error);

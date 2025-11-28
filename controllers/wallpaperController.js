@@ -1,14 +1,11 @@
 // server/controllers/wallpaperController.js
-const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-
-// Path to the wallpaper.json file
-const dataDir = path.join(__dirname, '../data');
-const wallpaperFilePath = path.join(dataDir, 'wallpaper.json');
+const WallpaperModel = require('../models/wallpaperModel');
 
 // Path to wallpapers directory
 const wallpapersDir = path.join(__dirname, '../wallpapers');
+const fs = require('fs');
 
 // Configure multer for wallpaper uploads
 const storage = multer.diskStorage({
@@ -47,39 +44,25 @@ const upload = multer({
     fileFilter: fileFilter
 });
 
-// Ensure the data directory exists
-const ensureDataDirExists = () => {
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    // Initialize wallpaper.json if it doesn't exist
-    if (!fs.existsSync(wallpaperFilePath)) {
-        fs.writeFileSync(wallpaperFilePath, JSON.stringify({ wallpaper: '' }), 'utf8');
-    }
-};
-
-// Get the current wallpaper
-const getWallpaper = (req, res) => {
+// Get the current active wallpaper from database
+const getWallpaper = async (req, res) => {
     try {
-        ensureDataDirExists();
+        const activeWallpaper = await WallpaperModel.getActiveWallpaper();
 
-        // Read the wallpaper.json file
-        const wallpaperData = JSON.parse(fs.readFileSync(wallpaperFilePath, 'utf8'));
+        if (!activeWallpaper) {
+            return res.status(200).json({ wallpaper: '' });
+        }
 
-        // Send the wallpaper URL as response
-        res.status(200).json({ wallpaper: wallpaperData.wallpaper });
+        res.status(200).json({ wallpaper: activeWallpaper.wallpaper_url });
     } catch (error) {
         console.error('Error retrieving wallpaper:', error);
         res.status(500).json({ error: 'Failed to retrieve wallpaper' });
     }
 };
 
-// Update the wallpaper
-const updateWallpaper = (req, res) => {
+// Update the active wallpaper in database
+const updateWallpaper = async (req, res) => {
     try {
-        ensureDataDirExists();
-
         const { wallpaper } = req.body;
 
         // Validate input
@@ -87,11 +70,13 @@ const updateWallpaper = (req, res) => {
             return res.status(400).json({ error: 'Valid wallpaper URL is required' });
         }
 
-        // Write the new wallpaper URL to the file
-        fs.writeFileSync(wallpaperFilePath, JSON.stringify({ wallpaper }), 'utf8');
+        // Set as active wallpaper in database
+        const updatedWallpaper = await WallpaperModel.setActiveWallpaper(wallpaper);
 
-        // Send success response
-        res.status(200).json({ message: 'Wallpaper updated successfully', wallpaper });
+        res.status(200).json({
+            message: 'Wallpaper updated successfully',
+            wallpaper: updatedWallpaper.wallpaper_url
+        });
     } catch (error) {
         console.error('Error updating wallpaper:', error);
         res.status(500).json({ error: 'Failed to update wallpaper' });
@@ -99,7 +84,7 @@ const updateWallpaper = (req, res) => {
 };
 
 // Handle wallpaper file upload
-const uploadWallpaper = (req, res) => {
+const uploadWallpaper = async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
@@ -107,6 +92,9 @@ const uploadWallpaper = (req, res) => {
 
         const filename = req.file.filename;
         const fileUrl = `${req.protocol}://${req.get('host')}/wallpapers/${filename}`;
+
+        // Optionally save to database (not as active)
+        await WallpaperModel.createWallpaper(fileUrl);
 
         res.status(200).json({
             message: 'Wallpaper uploaded successfully',
@@ -120,7 +108,7 @@ const uploadWallpaper = (req, res) => {
     }
 };
 
-// List all available wallpapers
+// List all available wallpapers (from filesystem)
 const listWallpapers = (req, res) => {
     try {
         // Ensure wallpapers directory exists
