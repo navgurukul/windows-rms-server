@@ -116,6 +116,36 @@ const WallpaperModel = {
             console.error('Error getting wallpaper by ID:', error);
             throw error;
         }
+    },
+
+    // Upsert device wallpaper mapping (update if exists, insert if not)
+    upsertDeviceWallpaper: async (device_id, wallpaper_id) => {
+        try {
+            // Check if mapping already exists for this device
+            const existing = await pool.query(
+                'SELECT * FROM device_wallpapers WHERE device_id = $1',
+                [device_id]
+            );
+
+            if (existing.rows.length > 0) {
+                // Update existing mapping
+                const result = await pool.query(
+                    'UPDATE device_wallpapers SET wallpaper_id = $1, updated_at = CURRENT_TIMESTAMP WHERE device_id = $2 RETURNING *',
+                    [wallpaper_id, device_id]
+                );
+                return result.rows[0];
+            } else {
+                // Insert new mapping
+                const result = await pool.query(
+                    'INSERT INTO device_wallpapers (device_id, wallpaper_id) VALUES ($1, $2) RETURNING *',
+                    [device_id, wallpaper_id]
+                );
+                return result.rows[0];
+            }
+        } catch (error) {
+            console.error('Error upserting device wallpaper:', error);
+            throw error;
+        }
     }
 };
 

@@ -2,6 +2,7 @@
 const path = require('path');
 const multer = require('multer');
 const WallpaperModel = require('../models/wallpaperModel');
+const DeviceModel = require('../models/deviceModel');
 
 // Path to wallpapers directory
 const wallpapersDir = path.join(__dirname, '../wallpapers');
@@ -48,7 +49,7 @@ const upload = multer({
 const getWallpaper = async (req, res) => {
     try {
         const serial_number = req.params.serial_number;
-        const device_id = await DeviceModel.getDeviceIdBySerialNumber(serial_number);
+        const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
         const activeWallpaper = await WallpaperModel.getActiveWallpaper(device_id);
 
         if (!activeWallpaper) {
@@ -62,22 +63,32 @@ const getWallpaper = async (req, res) => {
     }
 };
 
-// Update the active wallpaper in database
+// Update the active wallpaper for a specific device
 const updateWallpaper = async (req, res) => {
     try {
-        const { wallpaper } = req.body;
+        const { wallpaper_id, serial_number } = req.query;
 
         // Validate input
-        if (!wallpaper || typeof wallpaper !== 'string') {
-            return res.status(400).json({ error: 'Valid wallpaper URL is required' });
+        if (!serial_number) {
+            return res.status(400).json({ error: 'Serial number is required' });
+        }
+        if (!wallpaper_id) {
+            return res.status(400).json({ error: 'Valid wallpaper_id is required' });
         }
 
-        // Set as active wallpaper in database
-        const updatedWallpaper = await WallpaperModel.setActiveWallpaper(wallpaper);
+        // Get device ID from serial number
+        const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+        if (!device_id) {
+            return res.status(404).json({ error: 'Device not found' });
+        }
+
+        // Upsert device wallpaper mapping
+        const updatedMapping = await WallpaperModel.upsertDeviceWallpaper(device_id, wallpaper_id);
 
         res.status(200).json({
-            message: 'Wallpaper updated successfully',
-            wallpaper: updatedWallpaper.wallpaper_url
+            message: 'Wallpaper updated successfully for device',
+            device_id: updatedMapping.device_id,
+            wallpaper_id: updatedMapping.wallpaper_id
         });
     } catch (error) {
         console.error('Error updating wallpaper:', error);

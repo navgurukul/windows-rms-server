@@ -9,10 +9,10 @@ const {
 } = require('../controllers/wallpaperController');
 
 // GET endpoint to retrieve the current wallpaper URL
-router.get('/wallpaper', getWallpaper);
+router.get('/wallpaper/:serial_number', getWallpaper);
 
 // POST endpoint to update the wallpaper URL
-router.post('/wallpaper', updateWallpaper);
+router.post('/wallpaper/', updateWallpaper);
 
 // POST endpoint to upload a wallpaper file
 router.post('/wallpapers/upload', upload.single('wallpaper'), uploadWallpaper);
