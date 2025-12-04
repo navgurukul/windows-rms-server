@@ -47,7 +47,9 @@ const upload = multer({
 // Get the current active wallpaper from database
 const getWallpaper = async (req, res) => {
     try {
-        const activeWallpaper = await WallpaperModel.getActiveWallpaper();
+        const serial_number = req.params.serial_number;
+        const device_id = await DeviceModel.getDeviceIdBySerialNumber(serial_number);
+        const activeWallpaper = await WallpaperModel.getActiveWallpaper(device_id);
 
         if (!activeWallpaper) {
             return res.status(200).json({ wallpaper: '' });

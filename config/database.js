@@ -73,6 +73,20 @@ async function initializeDatabase() {
                 )
             `);
 
+        // Create device_wallpapers mapping table
+        await pool.query(`
+                CREATE TABLE IF NOT EXISTS device_wallpapers (
+                id SERIAL PRIMARY KEY,
+                device_id INTEGER NOT NULL,
+                wallpaper_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
+                FOREIGN KEY (wallpaper_id) REFERENCES wallpapers(id) ON DELETE CASCADE,
+                UNIQUE(device_id, wallpaper_id)
+                )
+            `);
+
         console.log('Database tables initialized successfully');
     } catch (error) {
         console.error('Error initializing database:', error);
