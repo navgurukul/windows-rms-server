@@ -63,36 +63,69 @@ const getWallpaper = async (req, res) => {
     }
 };
 
-// Update the active wallpaper for a specific device
+// Update the active wallpaper for multiple devices
 const updateWallpaper = async (req, res) => {
     try {
-        const { wallpaper_id, serial_number } = req.query;
+        const { serailNumberArray, wallpaper_id } = req.body;
 
         // Validate input
-        if (!serial_number) {
-            return res.status(400).json({ error: 'Serial number is required' });
+        if (!serailNumberArray || !Array.isArray(serailNumberArray) || serailNumberArray.length === 0) {
+            return res.status(400).json({ error: 'Valid serailNumberArray is required' });
         }
         if (!wallpaper_id) {
             return res.status(400).json({ error: 'Valid wallpaper_id is required' });
         }
 
-        // Get device ID from serial number
-        const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
-        if (!device_id) {
-            return res.status(404).json({ error: 'Device not found' });
-        }
+        // Process all serial numbers in parallel for better performance
+        const updatePromises = serailNumberArray.map(async (serial_number) => {
+            try {
+                // Get device ID from serial number
+                const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
 
-        // Upsert device wallpaper mapping
-        const updatedMapping = await WallpaperModel.upsertDeviceWallpaper(device_id, wallpaper_id);
+                if (!device_id) {
+                    return {
+                        success: false,
+                        serial_number,
+                        error: 'Device not found'
+                    };
+                }
 
-        res.status(200).json({
-            message: 'Wallpaper updated successfully for device',
-            device_id: updatedMapping.device_id,
-            wallpaper_id: updatedMapping.wallpaper_id
+                // Upsert device wallpaper mapping
+                const updatedMapping = await WallpaperModel.upsertDeviceWallpaper(device_id, parseInt(wallpaper_id));
+
+                return {
+                    success: true,
+                    serial_number,
+                    device_id: updatedMapping.device_id,
+                    wallpaper_id: updatedMapping.wallpaper_id,
+                    status: 'success'
+                };
+            } catch (err) {
+                return {
+                    success: false,
+                    serial_number,
+                    error: err.message
+                };
+            }
+        });
+
+        // Wait for all updates to complete
+        const allResults = await Promise.all(updatePromises);
+
+        // Separate successes and errors
+        const results = allResults.filter(r => r.success);
+        const errors = allResults.filter(r => !r.success).map(({ success, ...rest }) => rest);
+
+        return res.status(200).json({
+            message: `Wallpaper updated for ${results.length} device(s)`,
+            success_count: results.length,
+            error_count: errors.length,
+            results,
+            errors: errors.length > 0 ? errors : undefined
         });
     } catch (error) {
         console.error('Error updating wallpaper:', error);
-        res.status(500).json({ error: 'Failed to update wallpaper' });
+        return res.status(500).json({ error: 'Failed to update wallpaper' });
     }
 };
 
@@ -109,7 +142,7 @@ const uploadWallpaper = async (req, res) => {
         // Optionally save to database (not as active)
         await WallpaperModel.createWallpaper(fileUrl);
 
-        res.status(200).json({
+        return res.status(200).json({
             message: 'Wallpaper uploaded successfully',
             filename: filename,
             url: fileUrl,
@@ -117,7 +150,7 @@ const uploadWallpaper = async (req, res) => {
         });
     } catch (error) {
         console.error('Error uploading wallpaper:', error);
-        res.status(500).json({ error: 'Failed to upload wallpaper' });
+        return res.status(500).json({ error: 'Failed to upload wallpaper' });
     }
 };
 
@@ -146,13 +179,13 @@ const listWallpapers = (req, res) => {
                 };
             });
 
-        res.status(200).json({
+        return res.status(200).json({
             count: wallpapers.length,
             wallpapers: wallpapers
         });
     } catch (error) {
         console.error('Error listing wallpapers:', error);
-        res.status(500).json({ error: 'Failed to list wallpapers' });
+        return res.status(500).json({ error: 'Failed to list wallpapers' });
     }
 };
 
