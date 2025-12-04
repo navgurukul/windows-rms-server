@@ -9,7 +9,7 @@ const {
 } = require('../controllers/wallpaperController');
 
 // GET endpoint to retrieve the current wallpaper URL
-router.get('/wallpaper/:serial_number', getWallpaper);
+router.get('/wallpaper/', getWallpaper);
 
 // POST endpoint to update the wallpaper URL
 router.post('/wallpaper/', updateWallpaper);

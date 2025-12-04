@@ -4,6 +4,13 @@ const WallpaperModel = {
     // Get the currently active wallpaper
     getActiveWallpaper: async (device_id) => {
         try {
+            // Fall back to global active wallpaper
+            const globalWallpaper = await pool.query(
+                'SELECT id, wallpaper_url, is_active, created_at, updated_at FROM wallpapers WHERE is_active = true ORDER BY created_at DESC LIMIT 1'
+            );
+            if (device_id === null) {
+                return globalWallpaper.rows[0] || null;
+            }
             // First, try to get device-specific wallpaper with LEFT JOIN to get wallpaper details
             const deviceWallpaper = await pool.query(
                 `SELECT 
@@ -27,10 +34,6 @@ const WallpaperModel = {
                 return deviceWallpaper.rows[0];
             }
 
-            // Fall back to global active wallpaper
-            const globalWallpaper = await pool.query(
-                'SELECT id, wallpaper_url, is_active, created_at, updated_at FROM wallpapers WHERE is_active = true ORDER BY created_at DESC LIMIT 1'
-            );
             return globalWallpaper.rows[0] || null;
         } catch (error) {
             console.error('Error getting active wallpaper:', error);
