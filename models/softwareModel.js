@@ -33,10 +33,17 @@ const SoftwareModel = {
             return true;
         });
 
-        return result.map(s => ({
-            software_name: s.software_name,
-            winget_id: s.winget_id
-        }));
+        return result
+            .sort((a, b) => {
+                // Google.Chrome should appear at index 0
+                if (a.winget_id === 'Google.Chrome') return -1;
+                if (b.winget_id === 'Google.Chrome') return 1;
+                return 0;
+            })
+            .map(s => ({
+                software_name: s.software_name,
+                winget_id: s.winget_id
+            }));
     },
 
     addHistory: async (serial_number, software_name, isSuccessful) => {
