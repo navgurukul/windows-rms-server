@@ -28,7 +28,7 @@ const wallpaperRoutes = require('./routes/wallpaperRoutes');
 const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add this line
 
 // Import database initialization
-const { createSoftwareSeeder } = require('./config/database');
+const { pool, createSoftwareSeeder } = require('./config/database');
 
 // Simple logger middleware
 const logger = (req, res, next) => {
@@ -64,10 +64,16 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
+    // Check database connection
+    console.log('Testing database connection...');
+    await pool.query('SELECT 1');
+    console.log('✓ Database connection successful');
+
     await createSoftwareSeeder();
+
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
-      console.log('Database ready - migrations should be run separately via npm run db:migrate');
+      console.log(`Database ready`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
