@@ -8,91 +8,10 @@ const pool = new Pool({
     database: process.env.DB_NAME,
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
-    ssl: {
-        rejectUnauthorized: false
-    }
+    // ssl: {
+    //     rejectUnauthorized: false
+    // }
 });
-
-// Initialize database tables
-async function initializeDatabase() {
-    try {
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS devices (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(255) NOT NULL,
-                serial_number VARCHAR(50) NOT NULL UNIQUE,  
-                mac_address VARCHAR(50) NOT NULL,
-                location VARCHAR(255) NOT NULL,
-                isActive BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS laptop_tracking(
-                id SERIAL PRIMARY KEY,
-                device_id INTEGER NOT NULL,
-                total_active_time INTEGER NOT NULL,
-                latitude DECIMAL(9,6),
-                longitude DECIMAL(9,6),
-                location_name VARCHAR(255),
-                timestamp TIMESTAMP NOT NULL,
-                FOREIGN KEY (device_id) REFERENCES devices(id)
-                )
-            `);
-
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS softwares (
-                id SERIAL PRIMARY KEY,
-                software_name VARCHAR(255) NOT NULL,
-                winget_id VARCHAR(255) NOT NULL,
-                isActive BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS softwares_installed (
-                id SERIAL PRIMARY KEY,
-                device_id INTEGER NOT NULL,
-                software_name VARCHAR(255) NOT NULL,
-                isSuccessful BOOLEAN,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (device_id) REFERENCES devices(id)
-                )
-            `);
-
-        // Create wallpapers table
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS wallpapers (
-                id SERIAL PRIMARY KEY,
-                wallpaper_url VARCHAR(500) NOT NULL,
-                is_active BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-
-        // Create device_wallpapers mapping table
-        await pool.query(`
-                CREATE TABLE IF NOT EXISTS device_wallpapers (
-                id SERIAL PRIMARY KEY,
-                device_id INTEGER NOT NULL,
-                wallpaper_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-                FOREIGN KEY (wallpaper_id) REFERENCES wallpapers(id) ON DELETE CASCADE,
-                UNIQUE(device_id, wallpaper_id)
-                )
-            `);
-
-        console.log('Database tables initialized successfully');
-    } catch (error) {
-        console.error('Error initializing database:', error);
-        throw error;
-    }
-}
 
 async function createSoftwareSeeder() {
     try {
@@ -114,6 +33,5 @@ async function createSoftwareSeeder() {
 
 module.exports = {
     pool,
-    createSoftwareSeeder,
-    initializeDatabase
+    createSoftwareSeeder
 };

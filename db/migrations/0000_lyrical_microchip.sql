@@ -1,0 +1,62 @@
+-- -- Current sql file was generated after introspecting the database
+-- -- If you want to run this migration please uncomment this code before executing migrations
+-- /*
+-- CREATE TABLE "devices" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"username" varchar(255) NOT NULL,
+-- 	"serial_number" varchar(50) NOT NULL,
+-- 	"mac_address" varchar(50) NOT NULL,
+-- 	"location" varchar(255) NOT NULL,
+-- 	"isactive" boolean DEFAULT true,
+-- 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP,
+-- 	CONSTRAINT "devices_serial_number_key" UNIQUE("serial_number")
+-- );
+-- --> statement-breakpoint
+-- CREATE TABLE "laptop_tracking" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"device_id" integer NOT NULL,
+-- 	"total_active_time" integer NOT NULL,
+-- 	"latitude" numeric(9, 6),
+-- 	"longitude" numeric(9, 6),
+-- 	"location_name" varchar(255),
+-- 	"timestamp" timestamp NOT NULL
+-- );
+-- --> statement-breakpoint
+-- CREATE TABLE "softwares" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"software_name" varchar(255) NOT NULL,
+-- 	"winget_id" varchar(255) NOT NULL,
+-- 	"isactive" boolean DEFAULT true,
+-- 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP
+-- );
+-- --> statement-breakpoint
+-- CREATE TABLE "softwares_installed" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"device_id" integer NOT NULL,
+-- 	"software_name" varchar(255) NOT NULL,
+-- 	"issuccessful" boolean,
+-- 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP
+-- );
+-- --> statement-breakpoint
+-- CREATE TABLE "wallpapers" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"wallpaper_url" varchar(500) NOT NULL,
+-- 	"is_active" boolean DEFAULT false,
+-- 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP,
+-- 	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP
+-- );
+-- --> statement-breakpoint
+-- CREATE TABLE "device_wallpapers" (
+-- 	"id" serial PRIMARY KEY NOT NULL,
+-- 	"device_id" integer NOT NULL,
+-- 	"wallpaper_id" integer NOT NULL,
+-- 	"created_at" timestamp DEFAULT CURRENT_TIMESTAMP,
+-- 	"updated_at" timestamp DEFAULT CURRENT_TIMESTAMP,
+-- 	CONSTRAINT "device_wallpapers_device_id_wallpaper_id_key" UNIQUE("device_id","wallpaper_id")
+-- );
+-- --> statement-breakpoint
+-- ALTER TABLE "laptop_tracking" ADD CONSTRAINT "laptop_tracking_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "public"."devices"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+-- ALTER TABLE "softwares_installed" ADD CONSTRAINT "softwares_installed_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "public"."devices"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+-- ALTER TABLE "device_wallpapers" ADD CONSTRAINT "device_wallpapers_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "public"."devices"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- ALTER TABLE "device_wallpapers" ADD CONSTRAINT "device_wallpapers_wallpaper_id_fkey" FOREIGN KEY ("wallpaper_id") REFERENCES "public"."wallpapers"("id") ON DELETE cascade ON UPDATE no action;
+-- */
