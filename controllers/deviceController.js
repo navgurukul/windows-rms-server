@@ -3,13 +3,13 @@ const DeviceModel = require('../models/deviceModel');
 const DeviceController = {
     registerDevice: async (req, res) => {
         try {
-            const { username, serial_number, mac_address, location } = req.body;
+            const { username, serial_number, mac_address, location, rms_version } = req.body;
 
             if (!username || !serial_number || !mac_address || !location) {
                 return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
             }
 
-            const device = await DeviceModel.create(username, serial_number, mac_address, location);
+            const device = await DeviceModel.create(username, serial_number, mac_address, location, rms_version);
             return res.status(201).json(device);
         } catch (error) {
             console.error('Error registering device:', error);
@@ -46,12 +46,12 @@ const DeviceController = {
 
     statusUpdate: async (req, res) => {
         try {
-            const { serial_number, isActive } = req.body;
+            const { serial_number, isActive, rms_version } = req.body;
             const deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
             if (!deviceId) {
                 return res.status(404).json({ error: 'Device not found' });
             }
-            await DeviceModel.updateDeviceStatus(deviceId, isActive);
+            await DeviceModel.updateDeviceStatus(deviceId, isActive, rms_version);
             return res.status(200).json({ message: 'Device status updated successfully' });
         } catch (error) {
             console.error('Error updating device status:', error);

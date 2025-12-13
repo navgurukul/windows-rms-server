@@ -5,15 +5,40 @@ const DeviceModel = require('./deviceModel');
 const SoftwareModel = {
 
     getNotInstalledSoftwares: async (serial_number) => {
-        const allSoftwares = await pool.query('SELECT * FROM softwares');
         const deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+        if (!deviceId) return [];
+
+        const deviceDetails = await DeviceModel.getById(deviceId);
+        if (!deviceDetails) return [];
+
+        // Fetch all softwares
+        const allSoftwaresQuery = await pool.query('SELECT * FROM softwares');
+        const allSoftwares = allSoftwaresQuery.rows;
+
+        // Fetch Donor specific softwares
+        const donorSoftwaresQuery = await pool.query(
+            'SELECT software_id FROM donor_softwares WHERE donor_id = $1',
+            [deviceDetails.donor_id]
+        );
+        const donorSoftwareIds = new Set(donorSoftwaresQuery.rows.map(row => row.software_id));
+
+        // Fetch NGO specific softwares
+        const ngoSoftwaresQuery = await pool.query(
+            'SELECT software_id FROM ngo_softwares WHERE ngo_id = $1',
+            [deviceDetails.ngo_id]
+        );
+        const ngoSoftwareIds = new Set(ngoSoftwaresQuery.rows.map(row => row.software_id));
 
         const installedSoftwares = await pool.query(
             'SELECT * FROM softwares_installed WHERE device_id = $1',
             [deviceId]
         );
 
-        const result = allSoftwares.rows.filter(software => {
+        const result = allSoftwares.filter(software => {
+            // Check if software is applicable
+            const isApplicable = software.is_global || donorSoftwareIds.has(software.id) || ngoSoftwareIds.has(software.id);
+            if (!isApplicable) return false;
+
             // Find all installation attempts for this software
             const attempts = installedSoftwares.rows.filter(
                 s => s.software_name === software.software_name

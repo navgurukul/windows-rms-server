@@ -8,32 +8,53 @@ const WallpaperModel = {
             const globalWallpaper = await pool.query(
                 'SELECT id, wallpaper_url, is_active, created_at, updated_at FROM wallpapers WHERE is_active = true ORDER BY created_at DESC LIMIT 1'
             );
+
             if (device_id === null) {
                 return globalWallpaper.rows[0] || null;
             }
-            // First, try to get device-specific wallpaper with LEFT JOIN to get wallpaper details
+
+            // 1. Device Specific
             const deviceWallpaper = await pool.query(
                 `SELECT 
-                    dw.id,
-                    dw.device_id,
-                    dw.wallpaper_id,
-                    w.wallpaper_url,
-                    w.is_active,
-                    dw.created_at,
-                    dw.updated_at
+                    dw.id, dw.device_id, dw.wallpaper_id, w.wallpaper_url, w.is_active, dw.created_at, dw.updated_at
                 FROM device_wallpapers dw
                 LEFT JOIN wallpapers w ON dw.wallpaper_id = w.id
                 WHERE dw.device_id = $1
-                ORDER BY dw.updated_at DESC
-                LIMIT 1`,
+                ORDER BY dw.updated_at DESC LIMIT 1`,
                 [device_id]
             );
+            if (deviceWallpaper.rows.length > 0) return deviceWallpaper.rows[0];
 
-            // If device-specific wallpaper exists, return it
-            if (deviceWallpaper.rows.length > 0) {
-                return deviceWallpaper.rows[0];
-            }
+            // Get Device Details (NGO/Donor)
+            const deviceDetails = await pool.query('SELECT ngo_id, donor_id FROM devices WHERE id = $1', [device_id]);
+            if (deviceDetails.rows.length === 0) return globalWallpaper.rows[0];
+            const { ngo_id, donor_id } = deviceDetails.rows[0];
 
+            // 2. Donor Specific
+            const donorWallpaper = await pool.query(
+                `SELECT 
+                    dw.id, dw.donor_id, dw.wallpaper_id, w.wallpaper_url, w.is_active, dw.created_at
+                FROM donor_wallpapers dw
+                LEFT JOIN wallpapers w ON dw.wallpaper_id = w.id
+                WHERE dw.donor_id = $1
+                ORDER BY dw.created_at DESC LIMIT 1`,
+                [donor_id]
+            );
+            if (donorWallpaper.rows.length > 0) return donorWallpaper.rows[0];
+
+            // 3. NGO Specific
+            const ngoWallpaper = await pool.query(
+                `SELECT 
+                    nw.id, nw.ngo_id, nw.wallpaper_id, w.wallpaper_url, w.is_active, nw.created_at
+                FROM ngo_wallpapers nw
+                LEFT JOIN wallpapers w ON nw.wallpaper_id = w.id
+                WHERE nw.ngo_id = $1
+                ORDER BY nw.created_at DESC LIMIT 1`,
+                [ngo_id]
+            );
+            if (ngoWallpaper.rows.length > 0) return ngoWallpaper.rows[0];
+
+            // 4. Global
             return globalWallpaper.rows[0] || null;
         } catch (error) {
             console.error('Error getting active wallpaper:', error);
