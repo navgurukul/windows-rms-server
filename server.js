@@ -26,6 +26,8 @@ const logsRoutes = require('./routes/logsRoutes');
 const softwareRoutes = require('./routes/softwareRoutes');
 const wallpaperRoutes = require('./routes/wallpaperRoutes');
 const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add this line
+const ngoRoutes = require('./routes/ngoRoutes');
+const donorRoutes = require('./routes/donorRoutes');
 
 // Import database initialization
 const { pool, createSoftwareSeeder } = require('./config/database');
@@ -55,6 +57,8 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/softwares', softwareRoutes);
 app.use('/api/tracking', laptopTrackingRoutes);
+app.use('/api/ngos', ngoRoutes);
+app.use('/api/donors', donorRoutes);
 
 // Error handling
 app.use(errorHandler);
