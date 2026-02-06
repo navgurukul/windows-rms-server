@@ -1,1 +1,0 @@
-ALTER TABLE "device_wallpapers" DROP COLUMN "wallpaper_name";

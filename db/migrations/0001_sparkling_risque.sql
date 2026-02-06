@@ -1,1 +1,0 @@
-ALTER TABLE "device_wallpapers" ADD COLUMN "wallpaper_name" varchar(500);

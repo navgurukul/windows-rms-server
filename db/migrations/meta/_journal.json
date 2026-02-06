@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1765351105192,
-      "tag": "0000_lyrical_microchip",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1765352097639,
-      "tag": "0001_sparkling_risque",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1765352152316,
-      "tag": "0002_unique_rogue",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1765352748865,
-      "tag": "0003_smiling_overlord",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1765615791507,
-      "tag": "0004_conscious_killer_shrike",
+      "when": 1770298073683,
+      "tag": "0000_minor_silver_surfer",
       "breakpoints": true
     }
   ]
