@@ -20,12 +20,38 @@ const DeviceModel = {
     },
 
     getById: async (id) => {
-        const result = await pool.query('SELECT * FROM devices WHERE id = $1', [id]);
+        const query = `
+            SELECT 
+                d.*,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                COALESCE(SUM(lt.total_active_time), 0) as total_usage_minutes
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
+            WHERE d.id = $1
+            GROUP BY d.id, n."NGO_name", don.donor_name
+        `;
+        const result = await pool.query(query, [id]);
         return result.rows[0];
     },
 
     getAll: async () => {
-        const result = await pool.query('SELECT * FROM devices');
+        const query = `
+            SELECT 
+                d.*,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                COALESCE(SUM(lt.total_active_time), 0) as total_usage_minutes
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
+            GROUP BY d.id, n."NGO_name", don.donor_name
+            ORDER BY d.id
+        `;
+        const result = await pool.query(query);
         return result.rows;
     },
 
@@ -45,7 +71,20 @@ const DeviceModel = {
     },
 
     getBySerialNumber: async (serial_number) => {
-        const result = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
+        const query = `
+            SELECT 
+                d.*,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                COALESCE(SUM(lt.total_active_time), 0) as total_usage_minutes
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
+            WHERE d.serial_number = $1
+            GROUP BY d.id, n."NGO_name", don.donor_name
+        `;
+        const result = await pool.query(query, [serial_number]);
         return result.rows[0] || null;
     },
 
