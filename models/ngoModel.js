@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { generateUniqueNGOKey } = require('../utils/generateNGOKey');
 
 const NGOModel = {
     getAll: async () => {
@@ -12,9 +13,12 @@ const NGOModel = {
     },
 
     create: async (NGOName, isActive = false) => {
+        // Auto-generate unique key
+        const uniqueKey = await generateUniqueNGOKey(pool);
+
         const result = await pool.query(
-            'INSERT INTO "NGOs" ("NGO_name", is_active) VALUES ($1, $2) RETURNING *',
-            [NGOName, isActive]
+            'INSERT INTO "NGOs" ("NGO_name", unique_key, is_active) VALUES ($1, $2, $3) RETURNING *',
+            [NGOName, uniqueKey, isActive]
         );
         return result.rows[0];
     },

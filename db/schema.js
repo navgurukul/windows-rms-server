@@ -1,4 +1,4 @@
-import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric } from "drizzle-orm/pg-core"
+import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm/relations";
 import { sql } from "drizzle-orm"
 
@@ -97,6 +97,7 @@ export const deviceWallpapers = pgTable("device_wallpapers", {
 export const NGOs = pgTable("NGOs", {
     id: serial().primaryKey().notNull(),
     NGOName: varchar("NGO_name", { length: 500 }).notNull(),
+    uniqueKey: varchar("unique_key", { length: 30 }).notNull().unique().default(`D3F41T-K37`),
     isActive: boolean("is_active").default(false),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
     updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
@@ -275,4 +276,47 @@ export const ngoWallpapersRelations = relations(ngoWallpapers, ({ one }) => ({
 
 export const wallpapersRelations = relations(wallpapers, ({ many }) => ({
     deviceWallpapers: many(deviceWallpapers),
+}));
+
+// AFE (Amazon Future Engineer) Learning Data Tables
+export const afeDetails = pgTable("afe_details", {
+    id: serial().primaryKey().notNull(),
+    ngoId: integer("ngo_id").references(() => NGOs.id),
+    deviceId: integer("device_id").references(() => devices.id),
+    studentUuid: varchar("student_uuid", { length: 255 }).notNull(),
+    studentName: varchar("student_name", { length: 255 }).notNull(),
+    snapshotDate: varchar("snapshot_date", { length: 10 }).notNull(),  // YYYY-MM-DD
+    modulesStarted: integer("modules_started").notNull().default(0),
+    modulesCompleted: integer("modules_completed").notNull().default(0),
+    timeWatched: integer("time_watched").notNull().default(0),
+    timeRead: integer("time_read").notNull().default(0),
+    avgQuizScore: numeric("avg_quiz_score", { precision: 5, scale: 2 }).default('0'),
+    learningSummaryText: text("learning_summary_text"),
+    learningSummaryProgressNote: text("learning_summary_progress_note"),
+    learningSummaryUpdatedAt: timestamp("learning_summary_updated_at", { mode: 'string' }),
+    createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+    unique("afe_details_unique").on(table.deviceId, table.studentUuid, table.snapshotDate),
+    foreignKey({
+        columns: [table.ngoId],
+        foreignColumns: [NGOs.id],
+        name: "afe_details_ngo_id_fkey"
+    }),
+    foreignKey({
+        columns: [table.deviceId],
+        foreignColumns: [devices.id],
+        name: "afe_details_device_id_fkey"
+    }),
+]);
+
+export const afeDetailsRelations = relations(afeDetails, ({ one }) => ({
+    ngo: one(NGOs, {
+        fields: [afeDetails.ngoId],
+        references: [NGOs.id]
+    }),
+    device: one(devices, {
+        fields: [afeDetails.deviceId],
+        references: [devices.id]
+    }),
 }));
