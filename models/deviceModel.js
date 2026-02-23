@@ -8,15 +8,14 @@ const fetchDeviceIdFromSerialNumber = async (serial_number) => {
 
 const DeviceModel = {
     create: async (username, serial_number, mac_address, location, rms_version = '0.0.0', ngo_id = null, donor_id = null) => {
-        const deviceExists = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
+        // Check if device already exists by serial_number or mac_address
+        const deviceExists = await pool.query(
+            'SELECT * FROM devices WHERE serial_number = $1 OR mac_address = $2',
+            [serial_number, mac_address]
+        );
+
         if (deviceExists.rows.length > 0) {
-            // Update donor_id and ngo_id if they are provided and different
-            if (ngo_id || donor_id) {
-                await pool.query(
-                    'UPDATE devices SET ngo_id = COALESCE($1, ngo_id), donor_id = COALESCE($2, donor_id) WHERE serial_number = $3',
-                    [ngo_id, donor_id, serial_number]
-                );
-            }
+            // Return existing device without making any changes
             return deviceExists.rows[0];
         }
         const result = await pool.query(
@@ -95,6 +94,11 @@ const DeviceModel = {
         return result.rows[0] || null;
     },
 
+    getBySerialNumberOrMac: async (serial_number, mac_address) => {
+        const query = 'SELECT * FROM devices WHERE serial_number = $1 OR mac_address = $2';
+        const result = await pool.query(query, [serial_number, mac_address]);
+        return result.rows[0] || null;
+    },
     fetchDeviceIdFromSerialNumber
 };
 

@@ -12,6 +12,13 @@ const DeviceController = {
                 return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
             }
 
+            // Check if device already exists to avoid unnecessary API calls and duplicates
+            const existingDevice = await DeviceModel.getBySerialNumberOrMac(serial_number, mac_address);
+            if (existingDevice) {
+                console.log(`Device already exists (Serial: ${serial_number}, MAC: ${mac_address}). Returning existing record.`);
+                return res.status(200).json(existingDevice);
+            }
+
             // Fetch donor and ngo information from Google Apps Script API
             let donor_id = null;
             let ngo_id = null;
