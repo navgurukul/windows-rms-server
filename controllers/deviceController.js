@@ -1,4 +1,7 @@
+const axios = require('axios');
 const DeviceModel = require('../models/deviceModel');
+const DonorModel = require('../models/donorModel');
+const NgoModel = require('../models/ngoModel');
 
 const DeviceController = {
     registerDevice: async (req, res) => {
@@ -9,7 +12,45 @@ const DeviceController = {
                 return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
             }
 
-            const device = await DeviceModel.create(username, serial_number, mac_address, location, rms_version);
+            // Fetch donor and ngo information from Google Apps Script API
+            let donor_id = null;
+            let ngo_id = null;
+
+            try {
+                const apiUrl = `https://script.google.com/macros/s/AKfycbyNAvN4kwWEkeRQFVKXtZaUI8ijRakGxWJQB-XgabrPtrZosS8XlGhZauQv4RvUsMPFpg/exec?id=${serial_number}`;
+                console.log(`Fetching device details from API for serial: ${serial_number}`);
+                const apiResponse = await axios.get(apiUrl, { timeout: 10000 }); // 10s timeout
+                const apiData = apiResponse.data;
+
+                if (apiData && typeof apiData === 'object' && apiData.ID) {
+                    const donorName = apiData['Donor Company Name'];
+                    const ngoName = apiData['Allocated To'];
+
+                    if (donorName) {
+                        let donor = await DonorModel.getByName(donorName);
+                        if (!donor) {
+                            console.log(`Creating new donor: ${donorName}`);
+                            donor = await DonorModel.create(donorName, true);
+                        }
+                        donor_id = donor.id;
+                    }
+
+                    if (ngoName) {
+                        let ngo = await NgoModel.getByName(ngoName);
+                        if (!ngo) {
+                            console.log(`Creating new NGO: ${ngoName}`);
+                            ngo = await NgoModel.create(ngoName, true);
+                        }
+                        ngo_id = ngo.id;
+                    }
+                } else {
+                    console.log(`No device data found in Google Script for serial: ${serial_number}`);
+                }
+            } catch (apiError) {
+                console.error(`Error fetching device data from Google Script for ${serial_number}:`, apiError.message);
+            }
+
+            const device = await DeviceModel.create(username, serial_number, mac_address, location, rms_version, ngo_id, donor_id);
             return res.status(201).json(device);
         } catch (error) {
             console.error('Error registering device:', error);

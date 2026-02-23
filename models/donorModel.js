@@ -6,6 +6,11 @@ const DonorModel = {
         return result.rows;
     },
 
+    getByName: async (name) => {
+        const result = await pool.query('SELECT * FROM donors WHERE LOWER(donor_name) = LOWER($1)', [name]);
+        return result.rows[0] || null;
+    },
+
     getById: async (id) => {
         const result = await pool.query('SELECT * FROM donors WHERE id = $1', [id]);
         return result.rows[0] || null;
