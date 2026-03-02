@@ -30,19 +30,7 @@ const WallpaperModel = {
             if (deviceDetails.rows.length === 0) return globalWallpaper.rows[0];
             const { ngo_id, donor_id } = deviceDetails.rows[0];
 
-            // 2. NGO Specific
-            const ngoWallpaper = await pool.query(
-                `SELECT 
-                    nw.id, nw.ngo_id, nw.wallpaper_id, w.wallpaper_url, w.is_active, nw.created_at
-                FROM ngo_wallpapers nw
-                LEFT JOIN wallpapers w ON nw.wallpaper_id = w.id
-                WHERE nw.ngo_id = $1
-                ORDER BY nw.created_at DESC LIMIT 1`,
-                [ngo_id]
-            );
-            if (ngoWallpaper.rows.length > 0) return ngoWallpaper.rows[0];
-
-            // 3. Donor Specific
+            // 2. Donor Specific
             const donorWallpaper = await pool.query(
                 `SELECT 
                     dw.id, dw.donor_id, dw.wallpaper_id, w.wallpaper_url, w.is_active, dw.created_at
@@ -54,6 +42,19 @@ const WallpaperModel = {
             );
 
             if (donorWallpaper.rows.length > 0) return donorWallpaper.rows[0];
+
+            // 3. NGO Specific
+            const ngoWallpaper = await pool.query(
+                `SELECT 
+                    nw.id, nw.ngo_id, nw.wallpaper_id, w.wallpaper_url, w.is_active, nw.created_at
+                FROM ngo_wallpapers nw
+                LEFT JOIN wallpapers w ON nw.wallpaper_id = w.id
+                WHERE nw.ngo_id = $1
+                ORDER BY nw.created_at DESC LIMIT 1`,
+                [ngo_id]
+            );
+            if (ngoWallpaper.rows.length > 0) return ngoWallpaper.rows[0];
+
 
             // 4. Global
             return globalWallpaper.rows[0] || null;
