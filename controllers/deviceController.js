@@ -26,7 +26,7 @@ const DeviceController = {
             try {
                 const apiUrl = `https://script.google.com/macros/s/AKfycbyNAvN4kwWEkeRQFVKXtZaUI8ijRakGxWJQB-XgabrPtrZosS8XlGhZauQv4RvUsMPFpg/exec?id=${serial_number}`;
                 console.log(`Fetching device details from API for serial: ${serial_number}`);
-                const apiResponse = await axios.get(apiUrl, { timeout: 10000 }); // 10s timeout
+                const apiResponse = await axios.get(apiUrl, { timeout: 30000 }); // 30s timeout
                 const apiData = apiResponse.data;
 
                 if (apiData && typeof apiData === 'object' && apiData.ID) {
