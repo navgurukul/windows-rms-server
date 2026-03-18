@@ -5,6 +5,6 @@ const router = express.Router();
 
 router.post('/', Controller.uploadLogs);
 router.get('/', Controller.getLogFiles);
-router.get('/:filename', Controller.readLogFile);
+router.get('/:filename(*)', Controller.readLogFile);
 
 module.exports = router;

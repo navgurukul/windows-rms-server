@@ -116,6 +116,12 @@ const syncLaptopData = async (req, res) => {
 const bulkSyncLaptopData = async (req, res) => {
     const client = await pool.connect();
 
+    // Listen for client errors to prevent unhandled exceptions from crashing the server
+    // (e.g., if Postgres terminates an idle-in-transaction session)
+    client.on('error', (err) => {
+        console.error('Postgres client unexpected error in bulkSyncLaptopData:', err);
+    });
+
     try {
         const { records } = req.body;
 

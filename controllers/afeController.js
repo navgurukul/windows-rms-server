@@ -42,6 +42,11 @@ const AFEController = {
     syncAfeData: async (req, res) => {
         const client = await pool.connect();
 
+        // Listen for client errors to prevent unhandled exceptions from crashing the server
+        client.on('error', (err) => {
+            console.error('Postgres client unexpected error in syncAfeData:', err);
+        });
+
         try {
             const { ngoKey, serialNumber, macAddress, snapshots } = req.body;
 
@@ -51,6 +56,10 @@ const AFEController = {
                     error: 'Missing required fields: ngoKey, serialNumber, macAddress, snapshots[]'
                 });
             }
+
+            // 0. Get or create device BEFORE starting transaction
+            // This reduces the time the transaction remains open
+            let deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
 
             await client.query('BEGIN');
 
@@ -67,14 +76,12 @@ const AFEController = {
 
             const ngoId = ngoResult.rows[0].id;
 
-            // 2. Get or create device
-            let deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
-
             if (!deviceId) {
-                // Auto-create device
+                // Auto-create device within transaction if it still doesn't exist
                 const deviceResult = await client.query(
                     `INSERT INTO devices (username, serial_number, mac_address, location, ngo_id, rms_version)
                      VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (serial_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
                      RETURNING id`,
                     ['AFE-User', serialNumber, macAddress, 'Unknown', ngoId, '0.0.0']
                 );
