@@ -67,7 +67,9 @@ const SoftwareModel = {
             })
             .map(s => ({
                 software_name: s.software_name,
-                winget_id: s.winget_id
+                winget_id: s.winget_id,
+                source: s.source,
+                isPortable: s.is_portable
             }));
     },
 

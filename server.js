@@ -52,6 +52,7 @@ app.use(logger);
 
 // Serve wallpapers directory as static files
 app.use('/wallpapers', express.static('wallpapers'));
+app.use('/softwares', express.static('softwares'));
 
 // Routes
 app.use('/api', wallpaperRoutes);

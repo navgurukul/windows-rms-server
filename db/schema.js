@@ -47,7 +47,9 @@ export const softwares = pgTable("softwares", {
     id: serial().primaryKey().notNull(),
     softwareName: varchar("software_name", { length: 255 }).notNull(),
     wingetId: varchar("winget_id", { length: 255 }).notNull(),
+    source: varchar("source", { length: 255 }).default('winget'),
     isGlobal: boolean("is_global").default(true),
+    is_portable: boolean("is_portable").default(false),
     isactive: boolean().default(true),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "softwares" ADD COLUMN "source" varchar(255) DEFAULT 'winget';
