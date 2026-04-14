@@ -29,6 +29,7 @@ const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add th
 const ngoRoutes = require('./routes/ngoRoutes');
 const donorRoutes = require('./routes/donorRoutes');
 const afeRoutes = require('./routes/afeRoutes');
+const { startInactiveDeviceCron } = require('./utils/inactiveDeviceCron');
 
 // Import database initialization
 const { pool, createSoftwareSeeder } = require('./config/database');
@@ -78,6 +79,8 @@ async function startServer() {
     console.log('✓ Database connection successful');
 
     await createSoftwareSeeder();
+
+    startInactiveDeviceCron(pool);
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
