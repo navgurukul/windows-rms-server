@@ -32,6 +32,7 @@ const afeRoutes = require('./routes/afeRoutes');
 
 // Import database initialization
 const { pool, createSoftwareSeeder } = require('./config/database');
+const { scheduleLogCleanup } = require('./utils/logCleanup');
 
 // Simple logger middleware
 const logger = (req, res, next) => {
@@ -82,6 +83,8 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Database ready`);
+      // Start log cleanup scheduler
+      scheduleLogCleanup();
     });
   } catch (error) {
     console.error('Failed to start server:', error);

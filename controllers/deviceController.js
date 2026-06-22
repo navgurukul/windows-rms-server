@@ -12,12 +12,53 @@ const DeviceController = {
                 return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
             }
 
-            // Check if device already exists to avoid unnecessary API calls and duplicates
-            const existingDevice = await DeviceModel.getBySerialNumberOrMac(serial_number, mac_address);
+            // Helper to classify fallback serial numbers
+            const isFallbackSerial = (s) => {
+                if (!s) return true;
+                const upper = String(s).trim().toUpperCase();
+                return upper.startsWith('WIN-') || upper.startsWith('FP-') || upper.startsWith('NG-') || upper === 'UNKNOWN' || upper === 'N/A';
+            };
+
+            // 1. Search by serial number
+            let existingDevice = await DeviceModel.getBySerialNumber(serial_number);
             if (existingDevice) {
-                console.log(`Device already exists (Serial: ${serial_number}, MAC: ${mac_address}). Returning existing record.`);
+                console.log(`Device found by serial number: ${serial_number}. Updating details if changed.`);
+                existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                    username,
+                    mac_address,
+                    location,
+                    rms_version
+                });
                 return res.status(200).json(existingDevice);
             }
+
+            // 2. Search by MAC address
+            existingDevice = await DeviceModel.getByMacAddress(mac_address);
+            if (existingDevice) {
+                console.log(`Device found by MAC address: ${mac_address}. Current Serial in DB: ${existingDevice.serial_number}, Incoming Serial: ${serial_number}`);
+                
+                const existingIsFallback = isFallbackSerial(existingDevice.serial_number);
+                const incomingIsFallback = isFallbackSerial(serial_number);
+
+                if (existingIsFallback && !incomingIsFallback) {
+                    console.log(`Upgrading fallback serial ${existingDevice.serial_number} to hardware serial ${serial_number} in DB.`);
+                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                        serial_number,
+                        username,
+                        location,
+                        rms_version
+                    });
+                } else {
+                    console.log(`Keeping existing serial ${existingDevice.serial_number} in DB. Updating other details.`);
+                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                        username,
+                        location,
+                        rms_version
+                    });
+                }
+                return res.status(200).json(existingDevice);
+            }
+
 
             // Fetch donor and ngo information from Google Apps Script API
             let donor_id = null;

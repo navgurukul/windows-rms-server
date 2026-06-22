@@ -99,6 +99,44 @@ const DeviceModel = {
         const result = await pool.query(query, [serial_number, mac_address]);
         return result.rows[0] || null;
     },
+    getByMacAddress: async (mac_address) => {
+        const query = `
+            SELECT 
+                d.*,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                COALESCE(SUM(lt.total_active_time), 0) as total_usage_minutes
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
+            WHERE d.mac_address = $1
+            GROUP BY d.id, n."NGO_name", don.donor_name
+        `;
+        const result = await pool.query(query, [mac_address]);
+        return result.rows[0] || null;
+    },
+    updateDeviceDetails: async (id, fields) => {
+        const setClause = [];
+        const values = [];
+        let index = 1;
+        
+        for (const [key, value] of Object.entries(fields)) {
+            if (value !== undefined) {
+                setClause.push(`${key} = $${index}`);
+                values.push(value);
+                index++;
+            }
+        }
+        
+        if (setClause.length > 0) {
+            values.push(id);
+            const query = `UPDATE devices SET ${setClause.join(', ')} WHERE id = $${index}`;
+            await pool.query(query, values);
+        }
+        
+        return await DeviceModel.getById(id);
+    },
     fetchDeviceIdFromSerialNumber
 };
 
