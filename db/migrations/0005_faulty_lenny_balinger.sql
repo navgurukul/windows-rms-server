@@ -1,0 +1,1 @@
+ALTER TABLE "afe_details" ADD COLUMN "avatar_name" varchar(100);

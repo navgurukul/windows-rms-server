@@ -48,83 +48,178 @@ const AFEController = {
         });
 
         try {
-            const { ngoKey, serialNumber, macAddress, snapshots } = req.body;
+            const { ngoKey, serialNumber, macAddress, sessions } = req.body;
 
             // Validate request
-            if (!ngoKey || !serialNumber || !macAddress || !Array.isArray(snapshots)) {
+            if (!Array.isArray(sessions)) {
                 return res.status(400).json({
-                    error: 'Missing required fields: ngoKey, serialNumber, macAddress, snapshots[]'
+                    error: 'Missing required field: sessions[]'
                 });
             }
 
             // 0. Get or create device BEFORE starting transaction
             // This reduces the time the transaction remains open
-            let deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
+            let deviceId = null;
+            if (serialNumber) {
+                deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
+            }
 
             await client.query('BEGIN');
 
-            // 1. Validate NGO key
-            const ngoResult = await client.query(
-                'SELECT id FROM "NGOs" WHERE unique_key = $1',
-                [ngoKey]
-            );
-
-            if (ngoResult.rows.length === 0) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'Invalid NGO key' });
-            }
-
-            const ngoId = ngoResult.rows[0].id;
-
-            if (!deviceId) {
-                // Auto-create device within transaction if it still doesn't exist
-                const deviceResult = await client.query(
-                    `INSERT INTO devices (username, serial_number, mac_address, location, ngo_id, rms_version)
-                     VALUES ($1, $2, $3, $4, $5, $6)
-                     ON CONFLICT (serial_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                     RETURNING id`,
-                    ['AFE-User', serialNumber, macAddress, 'Unknown', ngoId, '0.0.0']
+            // 1. Validate NGO key (nullable for non-Sama devices)
+            let ngoId = null;
+            if (ngoKey) {
+                const ngoResult = await client.query(
+                    'SELECT id FROM "NGOs" WHERE unique_key = $1',
+                    [ngoKey]
                 );
-                deviceId = deviceResult.rows[0].id;
-                console.log(`[AFE] Auto-created device ${deviceId} for serial ${serialNumber}`);
+                if (ngoResult.rows.length > 0) {
+                    ngoId = ngoResult.rows[0].id;
+                }
             }
 
-            // 3. Upsert snapshots (idempotent via unique constraint)
+            if (!deviceId && serialNumber) {
+                // Auto-create device within transaction if it still doesn't exist
+                try {
+                    const deviceResult = await client.query(
+                        `INSERT INTO devices (username, serial_number, mac_address, location, ngo_id, rms_version)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (serial_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                         RETURNING id`,
+                        ['AFE-User', serialNumber, macAddress || 'UNKNOWN-MAC', 'Unknown', ngoId, '0.0.0']
+                    );
+                    deviceId = deviceResult.rows[0].id;
+                    console.log(`[AFE] Auto-created device ${deviceId} for serial ${serialNumber}`);
+                } catch (deviceError) {
+                    console.error(`[AFE] Failed to auto-create device for serial ${serialNumber}:`, deviceError);
+                    // Continue with deviceId = null
+                }
+            }
+
+            // 3. Upsert sessions (idempotent via unique constraint)
             const syncedIds = [];
 
-            for (const snapshot of snapshots) {
+            for (const session of sessions) {
                 const result = await client.query(
                     `INSERT INTO afe_details
-                    (ngo_id, device_id, student_uuid, student_name, snapshot_date,
-                     modules_started, modules_completed, time_watched, time_read, avg_quiz_score,
-                     learning_summary_text, learning_summary_progress_note, learning_summary_updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    ON CONFLICT (device_id, student_uuid, snapshot_date)
+                    (ngo_id, device_id, session_id, data_collection_method, partner_name, session_date,
+                     academic_year, month_name, state, district, school_udise, school_name, school_type,
+                     grade, student_count, student_dummy_id, class_section, unit_type, tour_type, language,
+                     delivery_model, session_duration_minutes, csat_avg, itp_avg, nps_score, response_rate_percentage,
+                     video_completion_rate, quiz_accuracy_percentage, avg_watch_time_seconds, videos_completed_count,
+                     quizzes_completed_count, total_questions_answered, correct_answers_count, session_completed_flag,
+                     completion_percentage, total_watch_time_seconds, avg_playback_speed, pause_count_total, seek_count_total,
+                     facilitator_name, teacher_confidence_rating, teacher_feedback_text, implementation_challenges,
+                     device_type, platform_os, platform_version, app_version, network_type, data_source, submission_date, avatar_name)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                            $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
+                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51)
+                    ON CONFLICT (session_id)
                     DO UPDATE SET
-                        modules_started = EXCLUDED.modules_started,
-                        modules_completed = EXCLUDED.modules_completed,
-                        time_watched = EXCLUDED.time_watched,
-                        time_read = EXCLUDED.time_read,
-                        avg_quiz_score = EXCLUDED.avg_quiz_score,
-                        learning_summary_text = EXCLUDED.learning_summary_text,
-                        learning_summary_progress_note = EXCLUDED.learning_summary_progress_note,
-                        learning_summary_updated_at = EXCLUDED.learning_summary_updated_at,
+                        ngo_id = EXCLUDED.ngo_id,
+                        device_id = EXCLUDED.device_id,
+                        data_collection_method = EXCLUDED.data_collection_method,
+                        partner_name = EXCLUDED.partner_name,
+                        session_date = EXCLUDED.session_date,
+                        academic_year = EXCLUDED.academic_year,
+                        month_name = EXCLUDED.month_name,
+                        state = EXCLUDED.state,
+                        district = EXCLUDED.district,
+                        school_udise = EXCLUDED.school_udise,
+                        school_name = EXCLUDED.school_name,
+                        school_type = EXCLUDED.school_type,
+                        grade = EXCLUDED.grade,
+                        student_count = EXCLUDED.student_count,
+                        student_dummy_id = EXCLUDED.student_dummy_id,
+                        class_section = EXCLUDED.class_section,
+                        unit_type = EXCLUDED.unit_type,
+                        tour_type = EXCLUDED.tour_type,
+                        language = EXCLUDED.language,
+                        delivery_model = EXCLUDED.delivery_model,
+                        session_duration_minutes = EXCLUDED.session_duration_minutes,
+                        csat_avg = EXCLUDED.csat_avg,
+                        itp_avg = EXCLUDED.itp_avg,
+                        nps_score = EXCLUDED.nps_score,
+                        response_rate_percentage = EXCLUDED.response_rate_percentage,
+                        video_completion_rate = EXCLUDED.video_completion_rate,
+                        quiz_accuracy_percentage = EXCLUDED.quiz_accuracy_percentage,
+                        avg_watch_time_seconds = EXCLUDED.avg_watch_time_seconds,
+                        videos_completed_count = EXCLUDED.videos_completed_count,
+                        quizzes_completed_count = EXCLUDED.quizzes_completed_count,
+                        total_questions_answered = EXCLUDED.total_questions_answered,
+                        correct_answers_count = EXCLUDED.correct_answers_count,
+                        session_completed_flag = EXCLUDED.session_completed_flag,
+                        completion_percentage = EXCLUDED.completion_percentage,
+                        total_watch_time_seconds = EXCLUDED.total_watch_time_seconds,
+                        avg_playback_speed = EXCLUDED.avg_playback_speed,
+                        pause_count_total = EXCLUDED.pause_count_total,
+                        seek_count_total = EXCLUDED.seek_count_total,
+                        facilitator_name = EXCLUDED.facilitator_name,
+                        teacher_confidence_rating = EXCLUDED.teacher_confidence_rating,
+                        teacher_feedback_text = EXCLUDED.teacher_feedback_text,
+                        implementation_challenges = EXCLUDED.implementation_challenges,
+                        device_type = EXCLUDED.device_type,
+                        platform_os = EXCLUDED.platform_os,
+                        platform_version = EXCLUDED.platform_version,
+                        app_version = EXCLUDED.app_version,
+                        network_type = EXCLUDED.network_type,
+                        data_source = EXCLUDED.data_source,
+                        submission_date = EXCLUDED.submission_date,
+                        avatar_name = EXCLUDED.avatar_name,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id`,
                     [
                         ngoId,
                         deviceId,
-                        snapshot.studentUuid,
-                        snapshot.studentName,
-                        snapshot.snapshotDate,
-                        Math.round(snapshot.modulesStarted || 0),
-                        Math.round(snapshot.modulesCompleted || 0),
-                        Math.round(snapshot.timeWatched || 0),
-                        Math.round(snapshot.timeRead || 0),
-                        snapshot.avgQuizScore,
-                        snapshot.learningSummary?.text || null,
-                        snapshot.learningSummary?.progressNote || null,
-                        snapshot.learningSummary?.lastUpdatedAt || null
+                        session.sessionId,
+                        session.dataCollectionMethod || 'Method 2 - Individual Tracking',
+                        session.partnerName || 'sama',
+                        session.sessionDate,
+                        session.academicYear,
+                        session.monthName,
+                        session.state,
+                        session.district,
+                        session.schoolUdise || null,
+                        session.schoolName,
+                        session.schoolType || 'NGO',
+                        session.grade,
+                        session.studentCount || 1,
+                        session.studentDummyId,
+                        session.classSection || null,
+                        session.unitType || 'Modular AFE',
+                        session.tourType || 'Virtual',
+                        session.language || 'English',
+                        session.deliveryModel || 'Self-paced',
+                        session.sessionDurationMinutes || 0,
+                        session.csatAvg,
+                        session.itpAvg,
+                        session.npsScore,
+                        session.responseRatePercentage,
+                        session.videoCompletionRate,
+                        session.quizAccuracyPercentage,
+                        session.avgWatchTimeSeconds,
+                        session.videosCompletedCount,
+                        session.quizzesCompletedCount,
+                        session.totalQuestionsAnswered,
+                        session.correctAnswersCount,
+                        session.sessionCompletedFlag,
+                        session.completionPercentage,
+                        session.totalWatchTimeSeconds,
+                        session.avgPlaybackSpeed,
+                        session.pauseCountTotal,
+                        session.seekCountTotal,
+                        session.facilitatorName || null,
+                        session.teacherConfidenceRating,
+                        session.teacherFeedbackText || null,
+                        session.implementationChallenges || null,
+                        session.deviceType || 'Laptop',
+                        session.platformOs,
+                        session.platformVersion,
+                        session.appVersion,
+                        session.networkType,
+                        session.dataSource || 'Local DB',
+                        session.submissionDate,
+                        session.avatarName || null
                     ]
                 );
                 syncedIds.push(result.rows[0].id);
@@ -132,7 +227,7 @@ const AFEController = {
 
             await client.query('COMMIT');
 
-            console.log(`[AFE] Successfully synced ${syncedIds.length} snapshots for device ${deviceId}`);
+            console.log(`[AFE] Successfully synced ${syncedIds.length} sessions for device ${deviceId}`);
 
             return res.status(200).json({
                 success: true,
@@ -149,20 +244,35 @@ const AFEController = {
     },
 
     /**
-     * Get aggregated overview data from materialized view
+     * Get aggregated overview data dynamically from afe_details
      * GET /api/afe/overview?ngoId=<id>
      */
     getOverview: async (req, res) => {
         try {
             const { ngoId } = req.query;
 
-            let query = 'SELECT * FROM afe_overview_view';
+            let query = `
+                SELECT
+                    ad.ngo_id,
+                    COUNT(DISTINCT ad.device_id) as total_laptops,
+                    COALESCE(SUM(ad.session_duration_minutes) / 60.0, 0) as total_working_hours,
+                    COALESCE(AVG(ad.quiz_accuracy_percentage), 0) as avg_quiz_score,
+                    COALESCE(AVG(ad.total_watch_time_seconds), 0) as avg_time_watched,
+                    COALESCE(SUM(ad.total_watch_time_seconds), 0) as total_time_watched,
+                    0 as avg_time_read,
+                    0 as total_time_read,
+                    COUNT(DISTINCT ad.student_dummy_id) as total_students,
+                    NOW() as last_updated_at
+                FROM afe_details ad
+            `;
             const params = [];
 
             if (ngoId) {
-                query += ' WHERE ngo_id = $1';
+                query += ' WHERE ad.ngo_id = $1';
                 params.push(ngoId);
             }
+
+            query += ' GROUP BY ad.ngo_id';
 
             const result = await pool.query(query, params);
             res.status(200).json(result.rows);
@@ -195,16 +305,16 @@ const AFEController = {
             }
 
             if (startDate) {
-                query += ` AND snapshot_date >= $${paramIndex++}`;
+                query += ` AND session_date >= $${paramIndex++}`;
                 params.push(startDate);
             }
 
             if (endDate) {
-                query += ` AND snapshot_date <= $${paramIndex++}`;
+                query += ` AND session_date <= $${paramIndex++}`;
                 params.push(endDate);
             }
 
-            query += ` ORDER BY snapshot_date DESC, student_name`;
+            query += ` ORDER BY session_date DESC, student_dummy_id`;
             query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
             params.push(limit, (page - 1) * limit);
 
