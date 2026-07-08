@@ -6,5 +6,6 @@ router.post('/validate-key', AFEController.validateNGOKey);
 router.post('/sync', AFEController.syncAfeData);
 router.get('/overview', AFEController.getOverview);
 router.get('/details', AFEController.getDetails);
+router.get('/export-csv', AFEController.exportCsv);
 
 module.exports = router;

@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
+const { Parser } = require('json2csv');
 
 const AFEController = {
     /**
@@ -323,6 +324,59 @@ const AFEController = {
         } catch (error) {
             console.error('[AFE] Error fetching details:', error);
             res.status(500).json({ error: 'Failed to fetch AFE details' });
+        }
+    },
+
+    /**
+     * Export AFE details as CSV
+     * GET /api/afe/export-csv?ngoId=<id>&deviceId=<id>&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>
+     */
+    exportCsv: async (req, res) => {
+        try {
+            const { ngoId, deviceId, startDate, endDate } = req.query;
+
+            let query = 'SELECT * FROM afe_details WHERE 1=1';
+            const params = [];
+            let paramIndex = 1;
+
+            if (ngoId) {
+                query += ` AND ngo_id = $${paramIndex++}`;
+                params.push(ngoId);
+            }
+
+            if (deviceId) {
+                query += ` AND device_id = $${paramIndex++}`;
+                params.push(deviceId);
+            }
+
+            if (startDate) {
+                query += ` AND session_date >= $${paramIndex++}`;
+                params.push(startDate);
+            }
+
+            if (endDate) {
+                query += ` AND session_date <= $${paramIndex++}`;
+                params.push(endDate);
+            }
+
+            query += ` ORDER BY session_date DESC, student_dummy_id`;
+
+            const result = await pool.query(query, params);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'No data found to export' });
+            }
+
+            const json2csvParser = new Parser();
+            const csvData = json2csvParser.parse(result.rows);
+
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=afe_export.csv');
+            res.status(200).send(csvData);
+
+        } catch (error) {
+            console.error('[AFE] Error exporting CSV:', error);
+            res.status(500).json({ error: 'Failed to export CSV' });
         }
     }
 };
