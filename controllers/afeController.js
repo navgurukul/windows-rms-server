@@ -111,10 +111,11 @@ const AFEController = {
                      quizzes_completed_count, total_questions_answered, correct_answers_count, session_completed_flag,
                      completion_percentage, total_watch_time_seconds, avg_playback_speed, pause_count_total, seek_count_total,
                      facilitator_name, teacher_confidence_rating, teacher_feedback_text, implementation_challenges,
-                     device_type, platform_os, platform_version, app_version, network_type, data_source, submission_date, avatar_name)
+                     device_type, platform_os, platform_version, app_version, network_type, data_source, submission_date, avatar_name,
+                     overall_rating, explore_career_rating, see_more_tours_rating)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51)
+                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         ngo_id = EXCLUDED.ngo_id,
@@ -167,6 +168,9 @@ const AFEController = {
                         data_source = EXCLUDED.data_source,
                         submission_date = EXCLUDED.submission_date,
                         avatar_name = EXCLUDED.avatar_name,
+                        overall_rating = EXCLUDED.overall_rating,
+                        explore_career_rating = EXCLUDED.explore_career_rating,
+                        see_more_tours_rating = EXCLUDED.see_more_tours_rating,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id`,
                     [
@@ -220,7 +224,10 @@ const AFEController = {
                         session.networkType,
                         session.dataSource || 'Local DB',
                         session.submissionDate,
-                        session.avatarName || null
+                        session.avatarName || null,
+                        session.overallRating ?? null,
+                        session.exploreCareerRating ?? null,
+                        session.seeMoreToursRating ?? null
                     ]
                 );
                 syncedIds.push(result.rows[0].id);

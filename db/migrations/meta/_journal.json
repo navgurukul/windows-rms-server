@@ -43,6 +43,13 @@
       "when": 1782194173996,
       "tag": "0005_faulty_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784879369901,
+      "tag": "0006_clean_iron_fist",
+      "breakpoints": true
     }
   ]
 }
