@@ -6,6 +6,7 @@ module.exports = {
     schema: "./db/schema.js",
     out: "./db/migrations",
     dialect: "postgresql",
+    schemaFilter: ["public"],
     dbCredentials: {
         host: process.env.DB_HOST,
         port: process.env.DB_PORT,
