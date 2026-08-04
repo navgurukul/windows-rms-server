@@ -58,8 +58,7 @@ const AFEController = {
                 });
             }
 
-            // 0. Get or create device BEFORE starting transaction
-            // This reduces the time the transaction remains open
+            // 0. Get device ID from serialNumber if present in devices table (otherwise leave deviceId as null/blank)
             let deviceId = null;
             if (serialNumber) {
                 deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
@@ -76,24 +75,6 @@ const AFEController = {
                 );
                 if (ngoResult.rows.length > 0) {
                     ngoId = ngoResult.rows[0].id;
-                }
-            }
-
-            if (!deviceId && serialNumber) {
-                // Auto-create device within transaction if it still doesn't exist
-                try {
-                    const deviceResult = await client.query(
-                        `INSERT INTO devices (username, serial_number, mac_address, location, ngo_id, rms_version)
-                         VALUES ($1, $2, $3, $4, $5, $6)
-                         ON CONFLICT (serial_number) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                         RETURNING id`,
-                        ['AFE-User', serialNumber, macAddress || 'UNKNOWN-MAC', 'Unknown', ngoId, '0.0.0']
-                    );
-                    deviceId = deviceResult.rows[0].id;
-                    console.log(`[AFE] Auto-created device ${deviceId} for serial ${serialNumber}`);
-                } catch (deviceError) {
-                    console.error(`[AFE] Failed to auto-create device for serial ${serialNumber}:`, deviceError);
-                    // Continue with deviceId = null
                 }
             }
 
@@ -291,42 +272,155 @@ const AFEController = {
     },
 
     /**
-     * Get detailed AFE data with pagination and filters
-     * GET /api/afe/details?ngoId=<id>&deviceId=<id>&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>&page=1&limit=100
+     * Get detailed AFE session data with pagination, metadata joins, and filters
+     * GET /api/afe/details
      */
     getDetails: async (req, res) => {
         try {
-            const { ngoId, deviceId, startDate, endDate, page = 1, limit = 100 } = req.query;
+            const {
+                ngoId,
+                deviceId,
+                serialNumber,
+                studentDummyId,
+                schoolUdise,
+                schoolName,
+                grade,
+                sessionCompleted,
+                startDate,
+                endDate,
+                search,
+                sortBy = 'session_date',
+                sortOrder = 'DESC',
+                page = 1,
+                limit = 100,
+                includeMeta
+            } = req.query;
 
-            let query = 'SELECT * FROM afe_details WHERE 1=1';
+            let baseQuery = `
+                FROM afe_details ad
+                LEFT JOIN devices d ON ad.device_id = d.id
+                LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
+                WHERE 1=1
+            `;
             const params = [];
             let paramIndex = 1;
 
             if (ngoId) {
-                query += ` AND ngo_id = $${paramIndex++}`;
+                baseQuery += ` AND ad.ngo_id = $${paramIndex++}`;
                 params.push(ngoId);
             }
 
             if (deviceId) {
-                query += ` AND device_id = $${paramIndex++}`;
+                baseQuery += ` AND ad.device_id = $${paramIndex++}`;
                 params.push(deviceId);
             }
 
+            if (serialNumber) {
+                baseQuery += ` AND d.serial_number = $${paramIndex++}`;
+                params.push(serialNumber);
+            }
+
+            if (studentDummyId) {
+                baseQuery += ` AND ad.student_dummy_id = $${paramIndex++}`;
+                params.push(studentDummyId);
+            }
+
+            if (schoolUdise) {
+                baseQuery += ` AND ad.school_udise = $${paramIndex++}`;
+                params.push(schoolUdise);
+            }
+
+            if (schoolName) {
+                baseQuery += ` AND ad.school_name ILIKE $${paramIndex++}`;
+                params.push(`%${schoolName}%`);
+            }
+
+            if (grade) {
+                baseQuery += ` AND ad.grade = $${paramIndex++}`;
+                params.push(grade);
+            }
+
+            if (sessionCompleted !== undefined && sessionCompleted !== '') {
+                const isCompleted = sessionCompleted === 'true' || sessionCompleted === true || sessionCompleted === '1';
+                baseQuery += ` AND ad.session_completed_flag = $${paramIndex++}`;
+                params.push(isCompleted);
+            }
+
             if (startDate) {
-                query += ` AND session_date >= $${paramIndex++}`;
+                baseQuery += ` AND ad.session_date >= $${paramIndex++}`;
                 params.push(startDate);
             }
 
             if (endDate) {
-                query += ` AND session_date <= $${paramIndex++}`;
+                baseQuery += ` AND ad.session_date <= $${paramIndex++}`;
                 params.push(endDate);
             }
 
-            query += ` ORDER BY session_date DESC, student_dummy_id`;
-            query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
-            params.push(limit, (page - 1) * limit);
+            if (search) {
+                baseQuery += ` AND (
+                    ad.session_id ILIKE $${paramIndex} OR
+                    ad.student_dummy_id ILIKE $${paramIndex} OR
+                    ad.school_name ILIKE $${paramIndex} OR
+                    ad.avatar_name ILIKE $${paramIndex} OR
+                    ad.facilitator_name ILIKE $${paramIndex} OR
+                    d.serial_number ILIKE $${paramIndex}
+                )`;
+                params.push(`%${search}%`);
+                paramIndex++;
+            }
 
-            const result = await pool.query(query, params);
+            // Get total count
+            const countQuery = `SELECT COUNT(*) as total ${baseQuery}`;
+            const countResult = await pool.query(countQuery, params);
+            const total = parseInt(countResult.rows[0].total, 10);
+
+            // Allowed sort columns to prevent SQL injection
+            const allowedSortColumns = {
+                session_date: 'ad.session_date',
+                created_at: 'ad.created_at',
+                completion_percentage: 'ad.completion_percentage',
+                session_duration_minutes: 'ad.session_duration_minutes',
+                student_dummy_id: 'ad.student_dummy_id',
+                school_name: 'ad.school_name',
+                grade: 'ad.grade'
+            };
+
+            const sortColumn = allowedSortColumns[sortBy] || 'ad.session_date';
+            const order = (sortOrder && String(sortOrder).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+            const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+            const parsedLimit = Math.max(1, Math.min(500, parseInt(limit, 10) || 100));
+            const offset = (parsedPage - 1) * parsedLimit;
+
+            const selectQuery = `
+                SELECT 
+                    ad.*,
+                    d.serial_number,
+                    d.mac_address,
+                    n."NGO_name" as ngo_name
+                ${baseQuery}
+                ORDER BY ${sortColumn} ${order}, ad.id DESC
+                LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+            `;
+            params.push(parsedLimit, offset);
+
+            const result = await pool.query(selectQuery, params);
+
+            res.setHeader('X-Total-Count', total);
+
+            if (includeMeta === 'true' || includeMeta === true) {
+                return res.status(200).json({
+                    success: true,
+                    pagination: {
+                        total,
+                        page: parsedPage,
+                        limit: parsedLimit,
+                        totalPages: Math.ceil(total / parsedLimit) || 1
+                    },
+                    data: result.rows
+                });
+            }
+
             res.status(200).json(result.rows);
         } catch (error) {
             console.error('[AFE] Error fetching details:', error);
@@ -340,33 +434,64 @@ const AFEController = {
      */
     exportCsv: async (req, res) => {
         try {
-            const { ngoId, deviceId, startDate, endDate } = req.query;
+            const { ngoId, deviceId, serialNumber, startDate, endDate, search } = req.query;
 
-            let query = 'SELECT * FROM afe_details WHERE 1=1';
+            let baseQuery = `
+                FROM afe_details ad
+                LEFT JOIN devices d ON ad.device_id = d.id
+                LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
+                WHERE 1=1
+            `;
             const params = [];
             let paramIndex = 1;
 
             if (ngoId) {
-                query += ` AND ngo_id = $${paramIndex++}`;
+                baseQuery += ` AND ad.ngo_id = $${paramIndex++}`;
                 params.push(ngoId);
             }
 
             if (deviceId) {
-                query += ` AND device_id = $${paramIndex++}`;
+                baseQuery += ` AND ad.device_id = $${paramIndex++}`;
                 params.push(deviceId);
             }
 
+            if (serialNumber) {
+                baseQuery += ` AND d.serial_number = $${paramIndex++}`;
+                params.push(serialNumber);
+            }
+
             if (startDate) {
-                query += ` AND session_date >= $${paramIndex++}`;
+                baseQuery += ` AND ad.session_date >= $${paramIndex++}`;
                 params.push(startDate);
             }
 
             if (endDate) {
-                query += ` AND session_date <= $${paramIndex++}`;
+                baseQuery += ` AND ad.session_date <= $${paramIndex++}`;
                 params.push(endDate);
             }
 
-            query += ` ORDER BY session_date DESC, student_dummy_id`;
+            if (search) {
+                baseQuery += ` AND (
+                    ad.session_id ILIKE $${paramIndex} OR
+                    ad.student_dummy_id ILIKE $${paramIndex} OR
+                    ad.school_name ILIKE $${paramIndex} OR
+                    ad.avatar_name ILIKE $${paramIndex} OR
+                    ad.facilitator_name ILIKE $${paramIndex} OR
+                    d.serial_number ILIKE $${paramIndex}
+                )`;
+                params.push(`%${search}%`);
+                paramIndex++;
+            }
+
+            const query = `
+                SELECT 
+                    ad.*,
+                    d.serial_number,
+                    d.mac_address,
+                    n."NGO_name" as ngo_name
+                ${baseQuery}
+                ORDER BY ad.session_date DESC, ad.student_dummy_id
+            `;
 
             const result = await pool.query(query, params);
 

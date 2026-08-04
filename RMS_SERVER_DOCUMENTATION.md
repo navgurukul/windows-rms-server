@@ -632,6 +632,32 @@ http://localhost:3000/api
 
 ---
 
+## Amazon Future Engineer (AFE) Module
+
+### Feature Overview
+The AFE module tracks and reports offline student learning activity from the AFE Learning App running on managed Windows laptops.
+
+### Key Endpoints
+
+#### GET /api/afe/details
+- **Purpose**: Fetch detailed student session learning data stored in `afe_details` with LEFT JOINs on `devices` (`serial_number`, `mac_address`) and `"NGOs"` (`ngo_name`).
+- **Query Parameters**: `ngoId`, `deviceId`, `serialNumber`, `studentDummyId`, `schoolUdise`, `schoolName`, `grade`, `sessionCompleted`, `startDate`, `endDate`, `search`, `sortBy`, `sortOrder`, `page`, `limit`, `includeMeta`.
+- **Response Format**:
+  - Array of session detail objects (default, includes `X-Total-Count` header).
+  - If `includeMeta=true`: `{ success: true, pagination: { total, page, limit, totalPages }, data: [...] }`.
+
+#### POST /api/afe/sync
+- **Purpose**: Synchronize local learning session snapshots from client devices.
+- **Body**: `{ ngoKey, serialNumber, macAddress, sessions: [...] }`.
+
+#### GET /api/afe/overview
+- **Purpose**: Aggregate AFE metrics per NGO (total laptops, working hours, quiz scores, student count).
+
+#### GET /api/afe/export-csv
+- **Purpose**: Export filtered AFE session data in CSV format.
+
+---
+
 ## Internal Implementation Details
 
 ### Server Startup Process
