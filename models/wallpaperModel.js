@@ -172,6 +172,120 @@ const WallpaperModel = {
             console.error('Error upserting device wallpaper:', error);
             throw error;
         }
+    },
+
+    getAssignments: async () => {
+        try {
+            const donorQuery = await pool.query(
+                `SELECT dw.wallpaper_id, d.id as entity_id, d."donor_name" as entity_name
+                 FROM donor_wallpapers dw
+                 JOIN donors d ON dw.donor_id = d.id`
+            );
+            
+            const ngoQuery = await pool.query(
+                `SELECT nw.wallpaper_id, n.id as entity_id, n."NGO_name" as entity_name
+                 FROM ngo_wallpapers nw
+                 JOIN "NGOs" n ON nw.ngo_id = n.id`
+            );
+
+            const assignments = {};
+            
+            // Format donors
+            donorQuery.rows.forEach(row => {
+                if (!assignments[row.wallpaper_id]) {
+                    assignments[row.wallpaper_id] = { donors: [], ngos: [] };
+                }
+                assignments[row.wallpaper_id].donors.push({ id: row.entity_id, name: row.entity_name });
+            });
+
+            // Format NGOs
+            ngoQuery.rows.forEach(row => {
+                if (!assignments[row.wallpaper_id]) {
+                    assignments[row.wallpaper_id] = { donors: [], ngos: [] };
+                }
+                assignments[row.wallpaper_id].ngos.push({ id: row.entity_id, name: row.entity_name });
+            });
+
+            return assignments;
+        } catch (error) {
+            console.error('Error getting assignments:', error);
+            throw error;
+        }
+    },
+
+    setActiveWallpaperById: async (id) => {
+        try {
+            await pool.query('BEGIN');
+            await pool.query('UPDATE wallpapers SET is_active = false');
+            const result = await pool.query(
+                'UPDATE wallpapers SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *',
+                [id]
+            );
+            await pool.query('COMMIT');
+            return result.rows[0];
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            console.error('Error setting active wallpaper by id:', error);
+            throw error;
+        }
+    },
+
+    assignToDonor: async (donor_id, wallpaper_id) => {
+        try {
+            await pool.query('DELETE FROM donor_wallpapers WHERE donor_id = $1', [donor_id]);
+            const result = await pool.query(
+                'INSERT INTO donor_wallpapers (donor_id, wallpaper_id) VALUES ($1, $2) RETURNING *',
+                [donor_id, wallpaper_id]
+            );
+            return result.rows[0];
+        } catch (error) {
+            console.error('Error assigning wallpaper to donor:', error);
+            throw error;
+        }
+    },
+
+    assignToNGO: async (ngo_id, wallpaper_id) => {
+        try {
+            await pool.query('DELETE FROM ngo_wallpapers WHERE ngo_id = $1', [ngo_id]);
+            const result = await pool.query(
+                'INSERT INTO ngo_wallpapers (ngo_id, wallpaper_id) VALUES ($1, $2) RETURNING *',
+                [ngo_id, wallpaper_id]
+            );
+            return result.rows[0];
+        } catch (error) {
+            console.error('Error assigning wallpaper to NGO:', error);
+            throw error;
+        }
+    },
+
+    unassignFromDonor: async (donor_id) => {
+        try {
+            await pool.query('DELETE FROM donor_wallpapers WHERE donor_id = $1', [donor_id]);
+            return true;
+        } catch (error) {
+            console.error('Error unassigning wallpaper from donor:', error);
+            throw error;
+        }
+    },
+
+    unassignFromNGO: async (ngo_id) => {
+        try {
+            await pool.query('DELETE FROM ngo_wallpapers WHERE ngo_id = $1', [ngo_id]);
+            return true;
+        } catch (error) {
+            console.error('Error unassigning wallpaper from NGO:', error);
+            throw error;
+        }
+    },
+
+    deleteWallpaperById: async (id) => {
+        try {
+            const result = await pool.query('DELETE FROM wallpapers WHERE id = $1 RETURNING *', [id]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Error deleting wallpaper:', error);
+            throw error;
+        }
     }
 };
 

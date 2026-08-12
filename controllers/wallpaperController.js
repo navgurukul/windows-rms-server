@@ -157,31 +157,9 @@ const uploadWallpaper = async (req, res) => {
     }
 };
 
-// List all available wallpapers (from filesystem)
-const listWallpapers = (req, res) => {
+const listWallpapers = async (req, res) => {
     try {
-        // Ensure wallpapers directory exists
-        if (!fs.existsSync(wallpapersDir)) {
-            return res.status(200).json({ wallpapers: [] });
-        }
-
-        // Read directory contents
-        const files = fs.readdirSync(wallpapersDir);
-
-        // Filter for image files and get metadata
-        const wallpapers = files
-            .filter(file => /\.(jpg|jpeg|png|webp)$/i.test(file))
-            .map(file => {
-                const filepath = path.join(wallpapersDir, file);
-                const stats = fs.statSync(filepath);
-                return {
-                    filename: file,
-                    url: `${req.protocol}://${req.get('host')}/wallpapers/${file}`,
-                    size: stats.size,
-                    modified: stats.mtime
-                };
-            });
-
+        const wallpapers = await WallpaperModel.getAllWallpapers();
         return res.status(200).json({
             count: wallpapers.length,
             wallpapers: wallpapers
@@ -192,10 +170,111 @@ const listWallpapers = (req, res) => {
     }
 };
 
+const getAssignments = async (req, res) => {
+    try {
+        const assignments = await WallpaperModel.getAssignments();
+        return res.status(200).json(assignments);
+    } catch (error) {
+        console.error('Error getting assignments:', error);
+        return res.status(500).json({ error: 'Failed to get assignments' });
+    }
+};
+
+const assignGlobal = async (req, res) => {
+    try {
+        const { wallpaper_id } = req.body;
+        if (!wallpaper_id) return res.status(400).json({ error: 'wallpaper_id is required' });
+        const result = await WallpaperModel.setActiveWallpaperById(wallpaper_id);
+        return res.status(200).json({ message: 'Global wallpaper assigned successfully', wallpaper: result });
+    } catch (error) {
+        console.error('Error assigning global wallpaper:', error);
+        return res.status(500).json({ error: 'Failed to assign global wallpaper' });
+    }
+};
+
+const assignToDonor = async (req, res) => {
+    try {
+        const { donor_id, wallpaper_id } = req.body;
+        if (!donor_id || !wallpaper_id) return res.status(400).json({ error: 'donor_id and wallpaper_id are required' });
+        const result = await WallpaperModel.assignToDonor(donor_id, wallpaper_id);
+        return res.status(200).json({ message: 'Wallpaper assigned to donor successfully', assignment: result });
+    } catch (error) {
+        console.error('Error assigning wallpaper to donor:', error);
+        return res.status(500).json({ error: 'Failed to assign wallpaper to donor' });
+    }
+};
+
+const assignToNGO = async (req, res) => {
+    try {
+        const { ngo_id, wallpaper_id } = req.body;
+        if (!ngo_id || !wallpaper_id) return res.status(400).json({ error: 'ngo_id and wallpaper_id are required' });
+        const result = await WallpaperModel.assignToNGO(ngo_id, wallpaper_id);
+        return res.status(200).json({ message: 'Wallpaper assigned to NGO successfully', assignment: result });
+    } catch (error) {
+        console.error('Error assigning wallpaper to NGO:', error);
+        return res.status(500).json({ error: 'Failed to assign wallpaper to NGO' });
+    }
+};
+
+const unassignFromDonor = async (req, res) => {
+    try {
+        const { donor_id } = req.body;
+        if (!donor_id) return res.status(400).json({ error: 'donor_id is required' });
+        await WallpaperModel.unassignFromDonor(donor_id);
+        return res.status(200).json({ message: 'Wallpaper unassigned from donor successfully' });
+    } catch (error) {
+        console.error('Error unassigning wallpaper from donor:', error);
+        return res.status(500).json({ error: 'Failed to unassign wallpaper from donor' });
+    }
+};
+
+const unassignFromNGO = async (req, res) => {
+    try {
+        const { ngo_id } = req.body;
+        if (!ngo_id) return res.status(400).json({ error: 'ngo_id is required' });
+        await WallpaperModel.unassignFromNGO(ngo_id);
+        return res.status(200).json({ message: 'Wallpaper unassigned from NGO successfully' });
+    } catch (error) {
+        console.error('Error unassigning wallpaper from NGO:', error);
+        return res.status(500).json({ error: 'Failed to unassign wallpaper from NGO' });
+    }
+};
+
+const deleteWallpaper = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await WallpaperModel.deleteWallpaperById(id);
+        if (!result) return res.status(404).json({ error: 'Wallpaper not found' });
+        
+        // Also delete file if exists
+        try {
+            const filename = result.wallpaper_url.split('/').pop();
+            const filepath = path.join(wallpapersDir, filename);
+            if (fs.existsSync(filepath)) {
+                fs.unlinkSync(filepath);
+            }
+        } catch (e) {
+            console.error('Failed to delete wallpaper file:', e);
+        }
+
+        return res.status(200).json({ message: 'Wallpaper deleted successfully', wallpaper: result });
+    } catch (error) {
+        console.error('Error deleting wallpaper:', error);
+        return res.status(500).json({ error: 'Failed to delete wallpaper' });
+    }
+};
+
 module.exports = {
     getWallpaper,
     updateWallpaper,
     uploadWallpaper,
     listWallpapers,
+    getAssignments,
+    assignGlobal,
+    assignToDonor,
+    assignToNGO,
+    unassignFromDonor,
+    unassignFromNGO,
+    deleteWallpaper,
     upload // Export multer upload middleware
 };
