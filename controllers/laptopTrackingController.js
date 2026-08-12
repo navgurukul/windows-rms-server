@@ -374,7 +374,41 @@ const getAllData = async (req, res) => {
                 limit: parseInt(limit)
             });
         } else {
-            const result = await pool.query(selectQuery, queryParams);
+            // For charting, if no date is provided, limit to last 30 days to avoid massive payloads and timeouts
+            if (!start_date && !end_date) {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+                
+                if (whereClause) {
+                    whereClause += ` AND DATE(lt.timestamp) >= $${queryParams.length + 1}`;
+                } else {
+                    whereClause = ` WHERE DATE(lt.timestamp) >= $${queryParams.length + 1}`;
+                }
+                queryParams.push(dateStr);
+            }
+
+            const chartQuery = `
+                SELECT 
+                    lt.id,
+                    d.id as device_id,
+                    d.username,
+                    d.serial_number,
+                    DATE(lt.timestamp) as date,
+                    lt.total_active_time,
+                    lt.total_active_time as total_time,
+                    lt.timestamp,
+                    lt.timestamp as last_updated,
+                    lt.latitude,
+                    lt.longitude,
+                    lt.location_name
+                FROM laptop_tracking lt
+                JOIN devices d ON lt.device_id = d.id
+                ${whereClause}
+                ORDER BY lt.timestamp DESC
+            `;
+
+            const result = await pool.query(chartQuery, queryParams);
             return res.status(200).json(result.rows);
         }
 
