@@ -61,6 +61,64 @@ const DeviceModel = {
         return result.rows;
     },
 
+    getAllPaginated: async (page = 1, limit = 10, filters = {}) => {
+        const offset = (page - 1) * limit;
+        
+        let whereClause = '';
+        let params = [];
+        let paramIndex = 1;
+
+        if (filters.search) {
+            whereClause += ` WHERE (d.username ILIKE $${paramIndex} OR d.serial_number ILIKE $${paramIndex} OR d.mac_address ILIKE $${paramIndex} OR d.location ILIKE $${paramIndex})`;
+            params.push(`%${filters.search}%`);
+            paramIndex++;
+        }
+
+        if (filters.ngoName) {
+            whereClause += (whereClause ? ' AND ' : ' WHERE ') + `n."NGO_name" ILIKE $${paramIndex}`;
+            params.push(`%${filters.ngoName}%`);
+            paramIndex++;
+        }
+
+        if (filters.donorName) {
+            whereClause += (whereClause ? ' AND ' : ' WHERE ') + `don.donor_name ILIKE $${paramIndex}`;
+            params.push(`%${filters.donorName}%`);
+            paramIndex++;
+        }
+
+        params.push(limit);
+        const limitIndex = paramIndex++;
+        params.push(offset);
+        const offsetIndex = paramIndex++;
+
+        const query = `
+            SELECT 
+                COUNT(*) OVER() as full_count,
+                d.*,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                COALESCE(SUM(lt.total_active_time), 0) as total_usage_minutes
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
+            ${whereClause}
+            GROUP BY d.id, n."NGO_name", don.donor_name
+            ORDER BY d.created_at DESC NULLS LAST, d.id DESC
+            LIMIT $${limitIndex} OFFSET $${offsetIndex}
+        `;
+        const result = await pool.query(query, params);
+        
+        const total = result.rows.length > 0 ? parseInt(result.rows[0].full_count, 10) : 0;
+        
+        const data = result.rows.map(row => {
+            const { full_count, ...rest } = row;
+            return rest;
+        });
+
+        return { data, total, page, limit };
+    },
+
     updateDeviceStatus: async (deviceId, isActive, rms_version) => {
         let query = 'UPDATE devices SET isActive = $1';
         const params = [isActive, deviceId];

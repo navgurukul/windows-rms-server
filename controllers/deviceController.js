@@ -108,6 +108,17 @@ const DeviceController = {
 
     getAllDevices: async (req, res) => {
         try {
+            const { pagination, page = 1, limit = 10, search, ngoName, donorName } = req.query;
+
+            if (pagination === '1') {
+                const paginatedResult = await DeviceModel.getAllPaginated(
+                    parseInt(page, 10) || 1, 
+                    parseInt(limit, 10) || 10, 
+                    { search, ngoName, donorName }
+                );
+                return res.json(paginatedResult);
+            }
+
             const devices = await DeviceModel.getAll();
             return res.json(devices);
         } catch (error) {
