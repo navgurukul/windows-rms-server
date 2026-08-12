@@ -3,6 +3,7 @@ const SoftwareController = require('../controllers/softwareController.js');
 
 const router = express.Router();
 
+router.get('/', SoftwareController.getAllSoftwares);
 router.get('/notInstalled', SoftwareController.getNotInstalledSoftwares);
 router.post('/addHistory', SoftwareController.addHistory);
 router.get('/history/:serial_number', SoftwareController.getInstallationHistory);

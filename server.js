@@ -17,7 +17,11 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please try again later.' },
-  validate: { trustProxy: false } // Disable validation since we're intentionally behind a proxy
+  validate: { trustProxy: false }, // Disable validation since we're intentionally behind a proxy
+  skip: (req) => {
+    // Bypass rate limiting for localhost during development
+    return req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1';
+  }
 });
 
 // Import routes - using correct paths based on your project structure

@@ -73,6 +73,11 @@ const SoftwareModel = {
             }));
     },
 
+    getAllSoftwares: async () => {
+        const result = await pool.query('SELECT * FROM softwares ORDER BY id DESC');
+        return result.rows;
+    },
+
     addHistory: async (serial_number, software_name, isSuccessful) => {
         const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
         if (!device_id) {

@@ -13,6 +13,16 @@ const SoftwareController = {
         }
     },
 
+    getAllSoftwares: async (req, res) => {
+        try {
+            const softwares = await SoftwareModel.getAllSoftwares();
+            return res.json(softwares);
+        } catch (error) {
+            console.error('Error fetching all softwares:', error);
+            res.status(500).json({ error: 'Failed to fetch all softwares' });
+        }
+    },
+
     addHistory: async (req, res) => {
         try {
             const { serial_number, software_name, isSuccessful } = req.body;
