@@ -158,6 +158,47 @@ const DeviceController = {
             return res.status(500).json({ error: 'Failed to update device status', message: error.message });
         }
     },
+
+    getDeviceById: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const device = await DeviceModel.getById(id);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(device);
+        } catch (error) {
+            console.error('Error fetching device by id:', error);
+            return res.status(500).json({ error: 'Failed to fetch device' });
+        }
+    },
+
+    updateDevice: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { username, ngo_id, donor_id } = req.body;
+
+            // Optional: Validate if NGO or Donor exist before assigning
+            
+            const fieldsToUpdate = {};
+            if (username !== undefined) fieldsToUpdate.username = username;
+            if (ngo_id !== undefined) fieldsToUpdate.ngo_id = ngo_id === '' ? null : ngo_id;
+            if (donor_id !== undefined) fieldsToUpdate.donor_id = donor_id === '' ? null : donor_id;
+
+            const updatedDevice = await DeviceModel.updateDeviceDetails(id, fieldsToUpdate);
+            
+            if (!updatedDevice) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(updatedDevice);
+        } catch (error) {
+            console.error('Error updating device:', error);
+            return res.status(500).json({ error: 'Failed to update device' });
+        }
+    }
 };
 
 module.exports = DeviceController;
