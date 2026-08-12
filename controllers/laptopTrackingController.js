@@ -314,57 +314,70 @@ const getDailyUsage = async (req, res) => {
  */
 const getAllData = async (req, res) => {
     try {
-        const { start_date, end_date } = req.query;
-        // Populate device_id from the device table
-        // Join with devices table to get device_id for each tracking record
-        let joinDeviceTable = `
+        const { start_date, end_date, pagination, page = 1, limit = 10 } = req.query;
+        
+        let queryParams = [];
+        let whereClause = '';
+
+        if (start_date || end_date) {
+            whereClause += ' WHERE';
+            if (start_date) {
+                whereClause += ` DATE(lt.timestamp) >= $${queryParams.length + 1}`;
+                queryParams.push(start_date);
+            }
+            if (end_date) {
+                if (start_date) whereClause += ' AND';
+                whereClause += ` DATE(lt.timestamp) <= $${queryParams.length + 1}`;
+                queryParams.push(end_date);
+            }
+        }
+
+        const selectQuery = `
             SELECT 
+                lt.id,
                 d.id as device_id,
+                d.username,
+                d.serial_number,
                 DATE(lt.timestamp) as date,
+                lt.total_active_time,
                 lt.total_active_time as total_time,
+                lt.timestamp,
                 lt.timestamp as last_updated,
                 lt.latitude,
                 lt.longitude,
                 lt.location_name
             FROM laptop_tracking lt
             JOIN devices d ON lt.device_id = d.id
+            ${whereClause}
+            ORDER BY lt.timestamp DESC
         `;
 
-        // let query = `
-        //     SELECT 
-        //         device_id,
-        //         DATE(timestamp) as date,
-        //         total_active_time as total_time,
-        //         timestamp as last_updated,
-        //         latitude,
-        //         longitude,
-        //         location_name
-        //     FROM laptop_tracking
-        // `;
+        if (pagination === '1' || pagination === 1) {
+            const countQuery = `
+                SELECT COUNT(*) 
+                FROM laptop_tracking lt 
+                JOIN devices d ON lt.device_id = d.id 
+                ${whereClause}
+            `;
+            const countResult = await pool.query(countQuery, queryParams);
+            const total = parseInt(countResult.rows[0].count);
 
-        const queryParams = [];
-
-        // Add date filtering if provided
-        if (start_date || end_date) {
-            joinDeviceTable += ' WHERE';
-
-            if (start_date) {
-                joinDeviceTable += ` DATE(timestamp) >= $${queryParams.length + 1}`;
-                queryParams.push(start_date);
-            }
-
-            if (end_date) {
-                if (start_date) joinDeviceTable += ' AND';
-                joinDeviceTable += ` DATE(timestamp) <= $${queryParams.length + 1}`;
-                queryParams.push(end_date);
-            }
+            const offset = (parseInt(page) - 1) * parseInt(limit);
+            const paginatedQuery = `${selectQuery} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
+            
+            const result = await pool.query(paginatedQuery, [...queryParams, parseInt(limit), offset]);
+            
+            return res.status(200).json({
+                data: result.rows,
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit)
+            });
+        } else {
+            const result = await pool.query(selectQuery, queryParams);
+            return res.status(200).json(result.rows);
         }
 
-        joinDeviceTable += ` ORDER BY date DESC, device_id`;
-
-        const result = await pool.query(joinDeviceTable, queryParams);
-
-        res.status(200).json(result.rows);
     } catch (error) {
         console.error('Error fetching all laptop tracking data:', error);
         res.status(500).json({ error: 'Failed to fetch laptop tracking data' });
