@@ -300,6 +300,7 @@ const AFEController = {
                 FROM afe_details ad
                 LEFT JOIN devices d ON ad.device_id = d.id
                 LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
+                LEFT JOIN "NGOs" dn ON d.ngo_id = dn.id
                 WHERE 1=1
             `;
             const params = [];
@@ -397,7 +398,8 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    n."NGO_name" as ngo_name
+                    n."NGO_name" as ngo_name,
+                    COALESCE(dn."NGO_name", ad.school_name) as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
                 LIMIT $${paramIndex++} OFFSET $${paramIndex++}
@@ -440,6 +442,7 @@ const AFEController = {
                 FROM afe_details ad
                 LEFT JOIN devices d ON ad.device_id = d.id
                 LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
+                LEFT JOIN "NGOs" dn ON d.ngo_id = dn.id
                 WHERE 1=1
             `;
             const params = [];
@@ -488,7 +491,8 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    n."NGO_name" as ngo_name
+                    n."NGO_name" as ngo_name,
+                    COALESCE(dn."NGO_name", ad.school_name) as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
             `;
