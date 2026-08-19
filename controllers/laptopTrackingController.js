@@ -1,6 +1,7 @@
 // server/controllers/laptopTrackingController.js
 const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
+const { isWithinIndia, matchCityLocation, groupIntoClusters } = require('../utils/geoUtils');
 
 /**
  * Syncs laptop tracking data from client to the server
@@ -524,11 +525,175 @@ const getSerialNumberData = async (req, res) => {
     }
 };
 
+/**
+ * Get high-level tracking overview, device inactivity breakdown, density clusters, and unmapped count
+ */
+const getTrackingOverview = async (req, res) => {
+    try {
+        const query = `
+            WITH latest_tracking AS (
+                SELECT DISTINCT ON (lt.device_id)
+                    lt.device_id,
+                    lt.id as tracking_id,
+                    lt.total_active_time,
+                    lt.latitude,
+                    lt.longitude,
+                    lt.location_name,
+                    lt.timestamp as last_sync_time
+                FROM laptop_tracking lt
+                ORDER BY lt.device_id, lt.timestamp DESC
+            )
+            SELECT 
+                d.id as device_id,
+                d.username,
+                d.serial_number,
+                d.mac_address,
+                d.location as registered_location,
+                d.isactive,
+                d.rms_version,
+                d.created_at,
+                n."NGO_name" as ngo_name,
+                don.donor_name,
+                lt.tracking_id,
+                lt.latitude,
+                lt.longitude,
+                lt.location_name as tracking_location,
+                lt.last_sync_time,
+                lt.total_active_time,
+                CASE 
+                    WHEN lt.last_sync_time IS NULL THEN 'never_synced'
+                    WHEN lt.last_sync_time < NOW() - INTERVAL '30 days' THEN 'inactive_30_days'
+                    WHEN lt.last_sync_time < NOW() - INTERVAL '7 days' THEN 'inactive_7_days'
+                    ELSE 'active'
+                END as activity_status,
+                CASE
+                    WHEN lt.last_sync_time IS NULL THEN NULL
+                    ELSE FLOOR(EXTRACT(EPOCH FROM (NOW() - lt.last_sync_time)) / 86400)::int
+                END as days_since_last_sync
+            FROM devices d
+            LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            LEFT JOIN latest_tracking lt ON d.id = lt.device_id
+            ORDER BY d.id ASC;
+        `;
+
+        const result = await pool.query(query);
+        const rows = result.rows;
+
+        let totalDevices = rows.length;
+        let offlineDevices = 0;
+        let inactive7Days = 0;
+        let inactive30Days = 0;
+        let neverSynced = 0;
+        let activeLast7Days = 0;
+        let mappedDevices = 0;
+        let unmappedDevices = 0;
+
+        const processedDevices = [];
+        const devicesWithCoords = [];
+
+        for (const row of rows) {
+            const isOffline = row.isactive === false;
+            if (isOffline) {
+                offlineDevices++;
+            }
+
+            const status = row.activity_status;
+            if (status === 'never_synced') {
+                neverSynced++;
+                inactive7Days++;
+                inactive30Days++;
+            } else if (status === 'inactive_30_days') {
+                inactive30Days++;
+                inactive7Days++;
+            } else if (status === 'inactive_7_days') {
+                inactive7Days++;
+            } else if (status === 'active') {
+                activeLast7Days++;
+            }
+
+            let lat = row.latitude ? parseFloat(row.latitude) : null;
+            let lng = row.longitude ? parseFloat(row.longitude) : null;
+            let isGeocodedFallback = false;
+            let locationName = row.tracking_location || row.registered_location || 'Unknown';
+
+            // Check if coordinates are valid numbers and inside India bounding box
+            let hasValidCoords = lat !== null && lng !== null && isWithinIndia(lat, lng);
+
+            if (!hasValidCoords) {
+                // Try fallback matching based on registered_location or tracking_location
+                const cityMatch = matchCityLocation(row.tracking_location) || matchCityLocation(row.registered_location);
+                if (cityMatch) {
+                    lat = cityMatch.lat;
+                    lng = cityMatch.lng;
+                    locationName = cityMatch.name;
+                    isGeocodedFallback = true;
+                    hasValidCoords = true;
+                }
+            }
+
+            const deviceItem = {
+                device_id: row.device_id,
+                username: row.username,
+                serial_number: row.serial_number,
+                mac_address: row.mac_address,
+                registered_location: row.registered_location,
+                tracking_location: row.tracking_location,
+                location_name: locationName,
+                isactive: row.isactive,
+                rms_version: row.rms_version,
+                created_at: row.created_at,
+                ngo_name: row.ngo_name,
+                donor_name: row.donor_name,
+                last_sync_time: row.last_sync_time,
+                days_since_last_sync: row.days_since_last_sync,
+                total_active_time: row.total_active_time ? parseInt(row.total_active_time) : 0,
+                activity_status: row.activity_status,
+                has_coordinates: hasValidCoords,
+                is_geocoded: isGeocodedFallback,
+                latitude: hasValidCoords ? lat : null,
+                longitude: hasValidCoords ? lng : null
+            };
+
+            processedDevices.push(deviceItem);
+
+            if (hasValidCoords) {
+                mappedDevices++;
+                devicesWithCoords.push(deviceItem);
+            } else {
+                unmappedDevices++;
+            }
+        }
+
+        const clusters = groupIntoClusters(devicesWithCoords);
+
+        return res.status(200).json({
+            metrics: {
+                total_devices: totalDevices,
+                offline_devices: offlineDevices,
+                inactive_7_days: inactive7Days,
+                inactive_30_days: inactive30Days,
+                never_synced: neverSynced,
+                active_last_7_days: activeLast7Days,
+                mapped_devices: mappedDevices,
+                unmapped_devices: unmappedDevices
+            },
+            clusters,
+            devices: processedDevices
+        });
+
+    } catch (error) {
+        console.error('Error fetching tracking overview:', error);
+        return res.status(500).json({ error: 'Failed to fetch tracking overview', details: error.message });
+    }
+};
+
 module.exports = {
     syncLaptopData,
     bulkSyncLaptopData,
     getDailyUsage,
     getAllData,
     getSystemData,
-    getSerialNumberData
-};
+    getSerialNumberData,
+    getTrackingOverview
+};
