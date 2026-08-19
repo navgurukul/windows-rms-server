@@ -23,6 +23,16 @@ const SoftwareController = {
         }
     },
 
+    getAssignments: async (req, res) => {
+        try {
+            const assignments = await SoftwareModel.getAssignments();
+            return res.json(assignments);
+        } catch (error) {
+            console.error('Error fetching software assignments:', error);
+            res.status(500).json({ error: 'Failed to fetch software assignments' });
+        }
+    },
+
     addHistory: async (req, res) => {
         try {
             const { serial_number, software_name, isSuccessful } = req.body;

@@ -78,6 +78,45 @@ const SoftwareModel = {
         return result.rows;
     },
 
+    getAssignments: async () => {
+        try {
+            const donorQuery = await pool.query(
+                `SELECT ds.software_id, d.id as entity_id, d."donor_name" as entity_name
+                 FROM donor_softwares ds
+                 JOIN donors d ON ds.donor_id = d.id`
+            );
+            
+            const ngoQuery = await pool.query(
+                `SELECT ns.software_id, n.id as entity_id, n."NGO_name" as entity_name
+                 FROM ngo_softwares ns
+                 JOIN "NGOs" n ON ns.ngo_id = n.id`
+            );
+
+            const assignments = {};
+            
+            // Format donors
+            donorQuery.rows.forEach(row => {
+                if (!assignments[row.software_id]) {
+                    assignments[row.software_id] = { donors: [], ngos: [] };
+                }
+                assignments[row.software_id].donors.push({ id: row.entity_id, name: row.entity_name });
+            });
+
+            // Format NGOs
+            ngoQuery.rows.forEach(row => {
+                if (!assignments[row.software_id]) {
+                    assignments[row.software_id] = { donors: [], ngos: [] };
+                }
+                assignments[row.software_id].ngos.push({ id: row.entity_id, name: row.entity_name });
+            });
+
+            return assignments;
+        } catch (error) {
+            console.error('Error getting software assignments:', error);
+            throw error;
+        }
+    },
+
     addHistory: async (serial_number, software_name, isSuccessful) => {
         const device_id = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
         if (!device_id) {
