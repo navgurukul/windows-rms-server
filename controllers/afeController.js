@@ -85,7 +85,7 @@ const AFEController = {
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, data_collection_method, partner_name, session_date,
-                     academic_year, month_name, state, district, school_udise, school_name, school_type,
+                     academic_year, month_name, state, city, district, district_code, school_udise, school_name, school_type,
                      grade, student_count, student_dummy_id, class_section, unit_type, tour_type, language,
                      delivery_model, session_duration_minutes, csat_avg, itp_avg, nps_score, response_rate_percentage,
                      video_completion_rate, quiz_accuracy_percentage, avg_watch_time_seconds, videos_completed_count,
@@ -96,7 +96,7 @@ const AFEController = {
                      overall_rating, explore_career_rating, see_more_tours_rating)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54)
+                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         ngo_id = EXCLUDED.ngo_id,
@@ -107,7 +107,9 @@ const AFEController = {
                         academic_year = EXCLUDED.academic_year,
                         month_name = EXCLUDED.month_name,
                         state = EXCLUDED.state,
+                        city = EXCLUDED.city,
                         district = EXCLUDED.district,
+                        district_code = EXCLUDED.district_code,
                         school_udise = EXCLUDED.school_udise,
                         school_name = EXCLUDED.school_name,
                         school_type = EXCLUDED.school_type,
@@ -164,10 +166,12 @@ const AFEController = {
                         session.academicYear,
                         session.monthName,
                         session.state,
+                        session.city || null,
                         session.district,
+                        session.districtCode || null,
                         session.schoolUdise || null,
                         session.schoolName,
-                        session.schoolType || 'NGO',
+                        session.schoolType || 'Government School',
                         session.grade,
                         session.studentCount || 1,
                         session.studentDummyId,
@@ -238,12 +242,15 @@ const AFEController = {
      */
     getOverview: async (req, res) => {
         try {
-            const { ngoId } = req.query;
+            const { ngoId, state, city, district, schoolType, schoolName } = req.query;
 
             let query = `
                 SELECT
                     ad.ngo_id,
                     COUNT(DISTINCT ad.device_id) as total_laptops,
+                    COUNT(DISTINCT ad.school_name) as total_schools,
+                    COUNT(DISTINCT ad.city) as total_cities,
+                    COUNT(DISTINCT ad.district) as total_districts,
                     COALESCE(SUM(ad.session_duration_minutes) / 60.0, 0) as total_working_hours,
                     COALESCE(AVG(ad.quiz_accuracy_percentage), 0) as avg_quiz_score,
                     COALESCE(AVG(ad.total_watch_time_seconds), 0) as avg_time_watched,
@@ -253,12 +260,39 @@ const AFEController = {
                     COUNT(DISTINCT ad.student_dummy_id) as total_students,
                     NOW() as last_updated_at
                 FROM afe_details ad
+                WHERE 1=1
             `;
             const params = [];
+            let paramIndex = 1;
 
             if (ngoId) {
-                query += ' WHERE ad.ngo_id = $1';
+                query += ` AND ad.ngo_id = $${paramIndex++}`;
                 params.push(ngoId);
+            }
+
+            if (state) {
+                query += ` AND ad.state ILIKE $${paramIndex++}`;
+                params.push(`%${state}%`);
+            }
+
+            if (city) {
+                query += ` AND ad.city ILIKE $${paramIndex++}`;
+                params.push(`%${city}%`);
+            }
+
+            if (district) {
+                query += ` AND ad.district ILIKE $${paramIndex++}`;
+                params.push(`%${district}%`);
+            }
+
+            if (schoolType) {
+                query += ` AND ad.school_type ILIKE $${paramIndex++}`;
+                params.push(`%${schoolType}%`);
+            }
+
+            if (schoolName) {
+                query += ` AND ad.school_name ILIKE $${paramIndex++}`;
+                params.push(`%${schoolName}%`);
             }
 
             query += ' GROUP BY ad.ngo_id';
@@ -362,6 +396,11 @@ const AFEController = {
                     ad.session_id ILIKE $${paramIndex} OR
                     ad.student_dummy_id ILIKE $${paramIndex} OR
                     ad.school_name ILIKE $${paramIndex} OR
+                    ad.city ILIKE $${paramIndex} OR
+                    ad.district ILIKE $${paramIndex} OR
+                    ad.state ILIKE $${paramIndex} OR
+                    ad.district_code ILIKE $${paramIndex} OR
+                    ad.school_type ILIKE $${paramIndex} OR
                     ad.avatar_name ILIKE $${paramIndex} OR
                     ad.facilitator_name ILIKE $${paramIndex} OR
                     d.serial_number ILIKE $${paramIndex}
@@ -478,6 +517,11 @@ const AFEController = {
                     ad.session_id ILIKE $${paramIndex} OR
                     ad.student_dummy_id ILIKE $${paramIndex} OR
                     ad.school_name ILIKE $${paramIndex} OR
+                    ad.city ILIKE $${paramIndex} OR
+                    ad.district ILIKE $${paramIndex} OR
+                    ad.state ILIKE $${paramIndex} OR
+                    ad.district_code ILIKE $${paramIndex} OR
+                    ad.school_type ILIKE $${paramIndex} OR
                     ad.avatar_name ILIKE $${paramIndex} OR
                     ad.facilitator_name ILIKE $${paramIndex} OR
                     d.serial_number ILIKE $${paramIndex}
