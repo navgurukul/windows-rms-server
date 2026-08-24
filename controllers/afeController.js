@@ -5,6 +5,39 @@ const { Parser } = require('json2csv');
 const AFEController = {
     
     /**
+     * Validate NGO registration key
+     * POST /api/afe/validate-key
+     * Body: { ngoKey }
+     */
+    validateNGOKey: async (req, res) => {
+        try {
+            const { ngoKey } = req.body;
+
+            if (!ngoKey) {
+                return res.status(400).json({ error: 'Missing ngoKey' });
+            }
+
+            const result = await pool.query(
+                'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
+                [ngoKey]
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ valid: false, error: 'Invalid NGO key' });
+            }
+
+            return res.status(200).json({
+                valid: true,
+                ngoId: result.rows[0].id,
+                ngoName: result.rows[0].NGO_name
+            });
+        } catch (error) {
+            console.error('[AFE] Error validating NGO key:', error);
+            res.status(500).json({ error: 'Failed to validate NGO key' });
+        }
+    },
+
+    /**
      * One-time historical backfill endpoint
      * POST /api/afe/backfill-historical
      * Body: { macAddress, serialNumber, sessionIds: [...] }
