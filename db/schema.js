@@ -367,3 +367,48 @@ export const afeDetailsRelations = relations(afeDetails, ({ one }) => ({
         references: [devices.id]
     }),
 }));
+
+// AFE Device Registry (tracks all laptops running AFE, with or without RMS)
+export const afeDevices = pgTable("afe_devices", {
+    id: serial().primaryKey().notNull(),
+    serialNumber: varchar("serial_number", { length: 255 }),
+    macAddress: varchar("mac_address", { length: 50 }),
+    deviceId: integer("device_id"),
+    ngoId: integer("ngo_id"),
+    partnerName: varchar("partner_name", { length: 100 }),
+    schoolName: varchar("school_name", { length: 255 }),
+    schoolUdise: varchar("school_udise", { length: 20 }),
+    state: varchar("state", { length: 100 }),
+    city: varchar("city", { length: 100 }),
+    district: varchar("district", { length: 100 }),
+    districtCode: varchar("district_code", { length: 50 }),
+    schoolType: varchar("school_type", { length: 100 }),
+    platformOs: varchar("platform_os", { length: 50 }),
+    hasRms: boolean("has_rms").default(false),
+    historicalSync: boolean("historical_sync").default(false),
+    lastSyncedAt: timestamp("last_synced_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+    createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+    foreignKey({
+        columns: [table.ngoId],
+        foreignColumns: [NGOs.id],
+        name: "afe_devices_ngo_id_fkey"
+    }),
+    foreignKey({
+        columns: [table.deviceId],
+        foreignColumns: [devices.id],
+        name: "afe_devices_device_id_fkey"
+    }),
+]);
+
+export const afeDevicesRelations = relations(afeDevices, ({ one }) => ({
+    ngo: one(NGOs, {
+        fields: [afeDevices.ngoId],
+        references: [NGOs.id]
+    }),
+    device: one(devices, {
+        fields: [afeDevices.deviceId],
+        references: [devices.id]
+    }),
+}));

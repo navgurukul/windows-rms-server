@@ -3,42 +3,115 @@ const DeviceModel = require('../models/deviceModel');
 const { Parser } = require('json2csv');
 
 const AFEController = {
+    
     /**
-     * Validate NGO key
-     * POST /api/afe/validate-key
+     * One-time historical backfill endpoint
+     * POST /api/afe/backfill-historical
+     * Body: { macAddress, serialNumber, sessionIds: [...] }
      */
-    validateNGOKey: async (req, res) => {
-        try {
-            const { ngoKey } = req.body;
+    backfillHistoricalData: async (req, res) => {
+        const client = await pool.connect();
+        client.on('error', (err) => {
+            console.error('Postgres client error in backfillHistoricalData:', err);
+        });
 
-            if (!ngoKey) {
-                return res.status(400).json({ error: 'ngoKey is required' });
+        try {
+            const { macAddress, serialNumber, sessionIds, schoolName, schoolUdise, state, city, district, districtCode, schoolType, platformOs } = req.body;
+
+            if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+                return res.status(400).json({ error: 'Missing or empty sessionIds[]' });
             }
 
-            const result = await pool.query(
-                'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
-                [ngoKey]
+            // 1. Resolve device via MAC address first, then serial number
+            const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
+            const deviceId = matchedDevice ? matchedDevice.id : null;
+            const ngoId = matchedDevice ? matchedDevice.ngo_id : null;
+            const partnerName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : 'sama';
+            const hasRms = !!matchedDevice;
+
+            await client.query('BEGIN');
+
+            // 2. Upsert into afe_devices registry
+            const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
+            const existingAfeDev = await client.query(
+                `SELECT id FROM afe_devices 
+                 WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(mac_address, '-', ':')) = $1)
+                    OR (serial_number IS NOT NULL AND serial_number = $2)
+                 LIMIT 1`,
+                [normalizedMac, serialNumber || '']
             );
 
-            if (result.rows.length === 0) {
-                return res.status(404).json({ valid: false, error: 'Invalid NGO key' });
+            if (existingAfeDev.rows.length > 0) {
+                await client.query(
+                    `UPDATE afe_devices SET
+                        serial_number = COALESCE($1, serial_number),
+                        mac_address = COALESCE($2, mac_address),
+                        device_id = COALESCE($3, device_id),
+                        ngo_id = COALESCE($4, ngo_id),
+                        partner_name = COALESCE($5, partner_name),
+                        school_name = COALESCE($6, school_name),
+                        school_udise = COALESCE($7, school_udise),
+                        state = COALESCE($8, state),
+                        city = COALESCE($9, city),
+                        district = COALESCE($10, district),
+                        district_code = COALESCE($11, district_code),
+                        school_type = COALESCE($12, school_type),
+                        platform_os = COALESCE($13, platform_os),
+                        has_rms = $14,
+                        historical_sync = true,
+                        last_synced_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $15`,
+                    [serialNumber, macAddress, deviceId, ngoId, partnerName, schoolName, schoolUdise, state, city, district, districtCode, schoolType, platformOs, hasRms, existingAfeDev.rows[0].id]
+                );
+            } else {
+                await client.query(
+                    `INSERT INTO afe_devices
+                    (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, school_udise, state, city, district, district_code, school_type, platform_os, has_rms, historical_sync, last_synced_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true, CURRENT_TIMESTAMP)`,
+                    [serialNumber, macAddress, deviceId, ngoId, partnerName, schoolName, schoolUdise, state, city, district, districtCode, schoolType, platformOs, hasRms]
+                );
             }
 
+            // 3. Update existing records in afe_details if RMS device was matched
+            let updatedCount = 0;
+            if (deviceId) {
+                const updateRes = await client.query(
+                    `UPDATE afe_details
+                     SET device_id = $1,
+                         ngo_id = COALESCE($2, ngo_id),
+                         partner_name = COALESCE($3, partner_name),
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE session_id = ANY($4)`,
+                    [deviceId, ngoId, partnerName, sessionIds]
+                );
+                updatedCount = updateRes.rowCount;
+            }
+
+            await client.query('COMMIT');
+            console.log(`[AFE Backfill] Successfully processed backfill for ${sessionIds.length} sessions, updated ${updatedCount} rows (device_id: ${deviceId})`);
+
             return res.status(200).json({
-                valid: true,
-                ngoId: result.rows[0].id,
-                ngoName: result.rows[0].NGO_name
+                success: true,
+                totalSessions: sessionIds.length,
+                updatedCount,
+                deviceId,
+                hasRms,
+                ngoName: partnerName
             });
         } catch (error) {
-            console.error('[AFE] Error validating NGO key:', error);
-            res.status(500).json({ error: 'Failed to validate NGO key' });
+            await client.query('ROLLBACK');
+            console.error('[AFE Backfill] Error in backfill:', error);
+            res.status(500).json({ error: 'Failed to process historical backfill' });
+        } finally {
+            client.release();
         }
     },
 
     /**
      * Sync AFE learning data from client
      * POST /api/afe/sync
-     * Body: { ngoKey, serialNumber, macAddress, snapshots: [...] }
+     * Body: { ngoKey, serialNumber, macAddress, sessions: [...] }
      */
     syncAfeData: async (req, res) => {
         const client = await pool.connect();
@@ -58,30 +131,79 @@ const AFEController = {
                 });
             }
 
-            // 0. Get device ID from serialNumber if present in devices table (otherwise leave deviceId as null/blank)
-            let deviceId = null;
-            if (serialNumber) {
-                deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serialNumber);
-            }
+            // 0. Resolve RMS device using MAC Address (Primary) and Serial Number (Fallback)
+            const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
+            let deviceId = matchedDevice ? matchedDevice.id : null;
+            let ngoId = matchedDevice ? matchedDevice.ngo_id : null;
+            let partnerName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : null;
+            const hasRms = !!matchedDevice;
 
             await client.query('BEGIN');
 
-            // 1. Validate NGO key (nullable for non-Sama devices)
-            let ngoId = null;
-            if (ngoKey) {
+            // 1. If NGO key is provided and valid, it can supplement or validate NGO
+            if (ngoKey && !ngoId) {
                 const ngoResult = await client.query(
-                    'SELECT id FROM "NGOs" WHERE unique_key = $1',
+                    'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
                     [ngoKey]
                 );
                 if (ngoResult.rows.length > 0) {
                     ngoId = ngoResult.rows[0].id;
+                    if (!partnerName) partnerName = ngoResult.rows[0].NGO_name;
                 }
             }
 
-            // 3. Upsert sessions (idempotent via unique constraint)
+            // Fallback partner name from first session if still not set
+            if (!partnerName && sessions.length > 0 && sessions[0].partnerName) {
+                partnerName = sessions[0].partnerName;
+            }
+
+            // 2. Upsert into afe_devices registry
+            const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
+            const firstSession = sessions[0] || {};
+            const existingAfeDev = await client.query(
+                `SELECT id FROM afe_devices 
+                 WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(mac_address, '-', ':')) = $1)
+                    OR (serial_number IS NOT NULL AND serial_number = $2)
+                 LIMIT 1`,
+                [normalizedMac, serialNumber || '']
+            );
+
+            if (existingAfeDev.rows.length > 0) {
+                await client.query(
+                    `UPDATE afe_devices SET
+                        serial_number = COALESCE($1, serial_number),
+                        mac_address = COALESCE($2, mac_address),
+                        device_id = COALESCE($3, device_id),
+                        ngo_id = COALESCE($4, ngo_id),
+                        partner_name = COALESCE($5, partner_name),
+                        school_name = COALESCE($6, school_name),
+                        school_udise = COALESCE($7, school_udise),
+                        state = COALESCE($8, state),
+                        city = COALESCE($9, city),
+                        district = COALESCE($10, district),
+                        district_code = COALESCE($11, district_code),
+                        school_type = COALESCE($12, school_type),
+                        platform_os = COALESCE($13, platform_os),
+                        has_rms = $14,
+                        last_synced_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $15`,
+                    [serialNumber, macAddress, deviceId, ngoId, partnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms, existingAfeDev.rows[0].id]
+                );
+            } else {
+                await client.query(
+                    `INSERT INTO afe_devices
+                    (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, school_udise, state, city, district, district_code, school_type, platform_os, has_rms, last_synced_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)`,
+                    [serialNumber, macAddress, deviceId, ngoId, partnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms]
+                );
+            }
+
+            // 3. Upsert sessions (idempotent via unique constraint on session_id)
             const syncedIds = [];
 
             for (const session of sessions) {
+                const sessionPartnerName = partnerName || session.partnerName || 'sama';
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, data_collection_method, partner_name, session_date,
@@ -99,10 +221,10 @@ const AFEController = {
                             $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
-                        ngo_id = EXCLUDED.ngo_id,
-                        device_id = EXCLUDED.device_id,
+                        ngo_id = COALESCE(EXCLUDED.ngo_id, afe_details.ngo_id),
+                        device_id = COALESCE(EXCLUDED.device_id, afe_details.device_id),
                         data_collection_method = EXCLUDED.data_collection_method,
-                        partner_name = EXCLUDED.partner_name,
+                        partner_name = COALESCE(EXCLUDED.partner_name, afe_details.partner_name),
                         session_date = EXCLUDED.session_date,
                         academic_year = EXCLUDED.academic_year,
                         month_name = EXCLUDED.month_name,
@@ -161,7 +283,7 @@ const AFEController = {
                         deviceId,
                         session.sessionId,
                         session.dataCollectionMethod || 'Method 2 - Individual Tracking',
-                        session.partnerName || 'sama',
+                        sessionPartnerName,
                         session.sessionDate,
                         session.academicYear,
                         session.monthName,
@@ -225,7 +347,9 @@ const AFEController = {
             return res.status(200).json({
                 success: true,
                 synced: syncedIds.length,
-                ids: syncedIds
+                ids: syncedIds,
+                deviceId,
+                hasRms
             });
         } catch (error) {
             await client.query('ROLLBACK');
@@ -235,6 +359,7 @@ const AFEController = {
             client.release();
         }
     },
+
 
     /**
      * Get aggregated overview data dynamically from afe_details
@@ -437,8 +562,7 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    n."NGO_name" as ngo_name,
-                    COALESCE(dn."NGO_name", ad.school_name) as school_name
+                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name, COALESCE(dn."NGO_name", ad.school_name) as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
                 LIMIT $${paramIndex++} OFFSET $${paramIndex++}
@@ -535,8 +659,7 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    n."NGO_name" as ngo_name,
-                    COALESCE(dn."NGO_name", ad.school_name) as school_name
+                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name, COALESCE(dn."NGO_name", ad.school_name) as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
             `;

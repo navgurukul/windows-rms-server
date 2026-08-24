@@ -1,6 +1,42 @@
 
 const { pool } = require('../config/database');
 
+
+const fetchDeviceByIdentifiers = async (mac_address, serial_number) => {
+    // Priority 1: Match by normalized MAC address (Primary source of truth)
+    if (mac_address && mac_address !== 'Unknown' && mac_address !== 'UNKNOWN-MAC') {
+        const normalizedMac = mac_address.replace(/[:-]/g, '').toLowerCase();
+        const macRes = await pool.query(
+            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address
+             FROM devices d
+             LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+             WHERE LOWER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $1
+             LIMIT 1`,
+            [normalizedMac]
+        );
+        if (macRes.rows.length > 0) {
+            return macRes.rows[0];
+        }
+    }
+
+    // Priority 2: Match by case-insensitive trimmed serial number (Fallback)
+    if (serial_number && serial_number !== 'Unknown' && serial_number !== 'UNKNOWN-SERIAL') {
+        const serialRes = await pool.query(
+            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address
+             FROM devices d
+             LEFT JOIN "NGOs" n ON d.ngo_id = n.id
+             WHERE UPPER(TRIM(d.serial_number)) = UPPER(TRIM($1))
+             LIMIT 1`,
+            [serial_number]
+        );
+        if (serialRes.rows.length > 0) {
+            return serialRes.rows[0];
+        }
+    }
+
+    return null;
+};
+
 const fetchDeviceIdFromSerialNumber = async (serial_number) => {
     const fetchDeviceId = await pool.query('SELECT * FROM devices WHERE serial_number = $1', [serial_number]);
     return fetchDeviceId?.rows[0]?.id || null;
@@ -195,7 +231,8 @@ const DeviceModel = {
         
         return await DeviceModel.getById(id);
     },
-    fetchDeviceIdFromSerialNumber
+    fetchDeviceIdFromSerialNumber,
+    fetchDeviceByIdentifiers
 };
 
 module.exports = DeviceModel;
