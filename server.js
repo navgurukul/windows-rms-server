@@ -25,6 +25,7 @@ const limiter = rateLimit({
 });
 
 // Import routes - using correct paths based on your project structure
+const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const logsRoutes = require('./routes/logsRoutes');
 const softwareRoutes = require('./routes/softwareRoutes');
@@ -33,6 +34,9 @@ const laptopTrackingRoutes = require('./routes/laptopTrackingRoutes'); // Add th
 const ngoRoutes = require('./routes/ngoRoutes');
 const donorRoutes = require('./routes/donorRoutes');
 const afeRoutes = require('./routes/afeRoutes');
+
+// Import authentication middleware
+const { verifyApiKey } = require('./middleware/auth');
 
 // Import database initialization
 const { pool, createSoftwareSeeder } = require('./config/database');
@@ -55,11 +59,17 @@ app.set('trust proxy', true);
 app.use(limiter);
 app.use(logger);
 
-// Serve wallpapers directory as static files
+// Serve wallpapers directory as static files (public)
 app.use('/wallpapers', express.static('wallpapers'));
 app.use('/softwares', express.static('softwares'));
 
-// Routes
+// Auth status route (public)
+app.use('/api/auth', authRoutes);
+
+// Global API Key Authentication Guard (all /api/* routes)
+app.use('/api', verifyApiKey);
+
+// Protected API Routes
 app.use('/api', wallpaperRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/devices', deviceRoutes);
