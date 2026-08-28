@@ -2,7 +2,16 @@ const { pool } = require('../config/database');
 
 const DonorModel = {
     getAll: async () => {
-        const result = await pool.query('SELECT * FROM donors ORDER BY created_at DESC');
+        const query = `
+            SELECT 
+                d.*,
+                COUNT(dev.id)::int as laptop_count
+            FROM donors d
+            LEFT JOIN devices dev ON dev.donor_id = d.id
+            GROUP BY d.id
+            ORDER BY d.created_at DESC
+        `;
+        const result = await pool.query(query);
         return result.rows;
     },
 
@@ -12,7 +21,16 @@ const DonorModel = {
     },
 
     getById: async (id) => {
-        const result = await pool.query('SELECT * FROM donors WHERE id = $1', [id]);
+        const query = `
+            SELECT 
+                d.*,
+                COUNT(dev.id)::int as laptop_count
+            FROM donors d
+            LEFT JOIN devices dev ON dev.donor_id = d.id
+            WHERE d.id = $1
+            GROUP BY d.id
+        `;
+        const result = await pool.query(query, [id]);
         return result.rows[0] || null;
     },
 

@@ -3,7 +3,16 @@ const { generateUniqueNGOKey } = require('../utils/generateNGOKey');
 
 const NGOModel = {
     getAll: async () => {
-        const result = await pool.query('SELECT * FROM "NGOs" ORDER BY created_at DESC');
+        const query = `
+            SELECT 
+                n.*,
+                COUNT(dev.id)::int as laptop_count
+            FROM "NGOs" n
+            LEFT JOIN devices dev ON dev.ngo_id = n.id
+            GROUP BY n.id
+            ORDER BY n.created_at DESC
+        `;
+        const result = await pool.query(query);
         return result.rows;
     },
 
@@ -13,7 +22,16 @@ const NGOModel = {
     },
 
     getById: async (id) => {
-        const result = await pool.query('SELECT * FROM "NGOs" WHERE id = $1', [id]);
+        const query = `
+            SELECT 
+                n.*,
+                COUNT(dev.id)::int as laptop_count
+            FROM "NGOs" n
+            LEFT JOIN devices dev ON dev.ngo_id = n.id
+            WHERE n.id = $1
+            GROUP BY n.id
+        `;
+        const result = await pool.query(query, [id]);
         return result.rows[0] || null;
     },
 
