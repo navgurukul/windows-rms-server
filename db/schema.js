@@ -306,6 +306,8 @@ export const afeDetails = pgTable("afe_details", {
     classSection: varchar("class_section", { length: 50 }),
     unitType: varchar("unit_type", { length: 100 }).default('Modular AFE'),
     tourType: varchar("tour_type", { length: 50 }).default('Virtual'),
+    moduleId: varchar("module_id", { length: 100 }),
+    moduleName: varchar("module_name", { length: 255 }),
     language: varchar("language", { length: 50 }).default('English'),
     deliveryModel: varchar("delivery_model", { length: 100 }).default('Self-paced'),
     sessionDurationMinutes: integer("session_duration_minutes").default(0),

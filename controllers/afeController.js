@@ -241,7 +241,7 @@ const AFEController = {
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, data_collection_method, partner_name, session_date,
                      academic_year, month_name, state, city, district, district_code, school_udise, school_name, school_type,
-                     grade, student_count, student_dummy_id, class_section, unit_type, tour_type, language,
+                     grade, student_count, student_dummy_id, class_section, unit_type, tour_type, module_id, module_name, language,
                      delivery_model, session_duration_minutes, csat_avg, itp_avg, nps_score, response_rate_percentage,
                      video_completion_rate, quiz_accuracy_percentage, avg_watch_time_seconds, videos_completed_count,
                      quizzes_completed_count, total_questions_answered, correct_answers_count, session_completed_flag,
@@ -251,7 +251,7 @@ const AFEController = {
                      overall_rating, explore_career_rating, see_more_tours_rating)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56)
+                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         ngo_id = COALESCE(EXCLUDED.ngo_id, afe_details.ngo_id),
@@ -274,6 +274,8 @@ const AFEController = {
                         class_section = EXCLUDED.class_section,
                         unit_type = EXCLUDED.unit_type,
                         tour_type = EXCLUDED.tour_type,
+                        module_id = EXCLUDED.module_id,
+                        module_name = EXCLUDED.module_name,
                         language = EXCLUDED.language,
                         delivery_model = EXCLUDED.delivery_model,
                         session_duration_minutes = EXCLUDED.session_duration_minutes,
@@ -333,6 +335,8 @@ const AFEController = {
                         session.classSection || null,
                         session.unitType || 'Modular AFE',
                         session.tourType || 'Virtual',
+                        session.moduleId || session.module_id || null,
+                        session.moduleName || session.module_name || session.tourName || session.tourType || null,
                         session.language || 'English',
                         session.deliveryModel || 'Self-paced',
                         session.sessionDurationMinutes || 0,
@@ -375,91 +379,122 @@ const AFEController = {
 
             await client.query('COMMIT');
 
-            console.log(`[AFE] Successfully synced ${syncedIds.length} sessions for device ${deviceId}`);
+            console.log(`[AFE] Successfully synced ${syncedIds.length} sessions (device_id: ${deviceId}, ngo_id: ${ngoId})`);
 
             return res.status(200).json({
                 success: true,
-                synced: syncedIds.length,
-                ids: syncedIds,
+                message: 'AFE learning data synced successfully',
+                syncedCount: syncedIds.length,
                 deviceId,
+                ngoId,
+                partnerName,
                 hasRms
             });
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('[AFE] Error syncing data:', error);
-            res.status(500).json({ error: 'Failed to sync AFE data' });
+            console.error('[AFE] Error syncing learning data:', error);
+            res.status(500).json({ error: 'Failed to sync AFE learning data' });
         } finally {
             client.release();
         }
     },
 
-
     /**
-     * Get aggregated overview data dynamically from afe_details
-     * GET /api/afe/overview?ngoId=<id>
+     * Get aggregated AFE learning metrics (Dashboard Overview)
+     * GET /api/afe/overview?ngoId=<id>&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>
      */
     getOverview: async (req, res) => {
         try {
-            const { ngoId, state, city, district, schoolType, schoolName } = req.query;
+            const { ngoId, deviceId, startDate, endDate } = req.query;
 
-            let query = `
-                SELECT
-                    ad.ngo_id,
-                    COUNT(DISTINCT ad.device_id) as total_laptops,
-                    COUNT(DISTINCT ad.school_name) as total_schools,
-                    COUNT(DISTINCT ad.city) as total_cities,
-                    COUNT(DISTINCT ad.district) as total_districts,
-                    COALESCE(SUM(ad.session_duration_minutes) / 60.0, 0) as total_working_hours,
-                    COALESCE(AVG(ad.quiz_accuracy_percentage), 0) as avg_quiz_score,
-                    COALESCE(AVG(ad.total_watch_time_seconds), 0) as avg_time_watched,
-                    COALESCE(SUM(ad.total_watch_time_seconds), 0) as total_time_watched,
-                    0 as avg_time_read,
-                    0 as total_time_read,
-                    COUNT(DISTINCT ad.student_dummy_id) as total_students,
-                    NOW() as last_updated_at
-                FROM afe_details ad
-                WHERE 1=1
-            `;
+            let baseWhere = 'WHERE 1=1';
             const params = [];
             let paramIndex = 1;
 
             if (ngoId) {
-                query += ` AND ad.ngo_id = $${paramIndex++}`;
+                baseWhere += ` AND ad.ngo_id = $${paramIndex++}`;
                 params.push(ngoId);
             }
 
-            if (state) {
-                query += ` AND ad.state ILIKE $${paramIndex++}`;
-                params.push(`%${state}%`);
+            if (deviceId) {
+                baseWhere += ` AND ad.device_id = $${paramIndex++}`;
+                params.push(deviceId);
             }
 
-            if (city) {
-                query += ` AND ad.city ILIKE $${paramIndex++}`;
-                params.push(`%${city}%`);
+            if (startDate) {
+                baseWhere += ` AND ad.session_date >= $${paramIndex++}`;
+                params.push(startDate);
             }
 
-            if (district) {
-                query += ` AND ad.district ILIKE $${paramIndex++}`;
-                params.push(`%${district}%`);
+            if (endDate) {
+                baseWhere += ` AND ad.session_date <= $${paramIndex++}`;
+                params.push(endDate);
             }
 
-            if (schoolType) {
-                query += ` AND ad.school_type ILIKE $${paramIndex++}`;
-                params.push(`%${schoolType}%`);
-            }
-
-            if (schoolName) {
-                query += ` AND ad.school_name ILIKE $${paramIndex++}`;
-                params.push(`%${schoolName}%`);
-            }
-
-            query += ' GROUP BY ad.ngo_id';
+            const query = `
+                SELECT 
+                    COUNT(DISTINCT ad.session_id) as total_sessions,
+                    COUNT(DISTINCT ad.student_dummy_id) as total_students,
+                    COUNT(DISTINCT ad.device_id) as active_laptops,
+                    COUNT(DISTINCT ad.school_udise) as total_schools,
+                    ROUND(COALESCE(SUM(ad.session_duration_minutes), 0)::numeric / 60, 2) as total_learning_hours,
+                    ROUND(COALESCE(AVG(ad.session_duration_minutes), 0)::numeric, 1) as avg_session_duration_mins,
+                    ROUND(COALESCE(AVG(ad.video_completion_rate), 0)::numeric, 2) as avg_video_completion_rate,
+                    ROUND(COALESCE(AVG(ad.quiz_accuracy_percentage), 0)::numeric, 2) as avg_quiz_accuracy,
+                    ROUND(COALESCE(AVG(ad.completion_percentage), 0)::numeric, 2) as avg_session_completion,
+                    ROUND(COALESCE(AVG(ad.csat_avg), 0)::numeric, 2) as avg_csat,
+                    ROUND(COALESCE(AVG(ad.itp_avg), 0)::numeric, 2) as avg_itp,
+                    ROUND(COALESCE(AVG(ad.overall_rating), 0)::numeric, 2) as avg_overall_rating,
+                    ROUND(COALESCE(AVG(ad.explore_career_rating), 0)::numeric, 2) as avg_explore_career_rating,
+                    ROUND(COALESCE(AVG(ad.see_more_tours_rating), 0)::numeric, 2) as avg_see_more_tours_rating,
+                    COALESCE(SUM(ad.videos_completed_count), 0) as total_videos_completed,
+                    COALESCE(SUM(ad.quizzes_completed_count), 0) as total_quizzes_completed,
+                    COALESCE(SUM(ad.total_questions_answered), 0) as total_questions_answered,
+                    COALESCE(SUM(ad.correct_answers_count), 0) as total_correct_answers
+                FROM afe_details ad
+                ${baseWhere}
+            `;
 
             const result = await pool.query(query, params);
-            res.status(200).json(result.rows);
+            res.status(200).json(result.rows[0]);
+
         } catch (error) {
-            console.error('[AFE] Error fetching overview:', error);
-            res.status(500).json({ error: 'Failed to fetch AFE overview' });
+            console.error('[AFE] Error fetching overview metrics:', error);
+            res.status(500).json({ error: 'Failed to fetch AFE overview metrics' });
+        }
+    },
+
+    /**
+     * Get per-NGO breakdown of AFE metrics
+     * GET /api/afe/ngo-summary
+     */
+    getNgoSummary: async (req, res) => {
+        try {
+            const query = `
+                SELECT 
+                    n.id as ngo_id,
+                    n."NGO_name" as ngo_name,
+                    n.contact_person,
+                    n.email,
+                    COUNT(DISTINCT ad.session_id) as total_sessions,
+                    COUNT(DISTINCT ad.student_dummy_id) as total_students,
+                    COUNT(DISTINCT ad.device_id) as active_devices,
+                    ROUND(COALESCE(SUM(ad.session_duration_minutes), 0)::numeric / 60, 2) as total_learning_hours,
+                    ROUND(COALESCE(AVG(ad.completion_percentage), 0)::numeric, 2) as avg_completion_rate,
+                    ROUND(COALESCE(AVG(ad.quiz_accuracy_percentage), 0)::numeric, 2) as avg_quiz_accuracy,
+                    MAX(ad.session_date) as last_activity_date
+                FROM "NGOs" n
+                LEFT JOIN afe_details ad ON n.id = ad.ngo_id
+                GROUP BY n.id, n."NGO_name", n.contact_person, n.email
+                ORDER BY total_sessions DESC
+            `;
+
+            const result = await pool.query(query);
+            res.status(200).json(result.rows);
+
+        } catch (error) {
+            console.error('[AFE] Error fetching NGO summary:', error);
+            res.status(500).json({ error: 'Failed to fetch NGO summary' });
         }
     },
 
@@ -476,6 +511,8 @@ const AFEController = {
                 studentDummyId,
                 schoolUdise,
                 schoolName,
+                moduleId,
+                moduleName,
                 grade,
                 sessionCompleted,
                 startDate,
@@ -528,6 +565,16 @@ const AFEController = {
                 params.push(`%${schoolName}%`);
             }
 
+            if (moduleId) {
+                baseQuery += ` AND ad.module_id = $${paramIndex++}`;
+                params.push(moduleId);
+            }
+
+            if (moduleName) {
+                baseQuery += ` AND ad.module_name ILIKE $${paramIndex++}`;
+                params.push(`%${moduleName}%`);
+            }
+
             if (grade) {
                 baseQuery += ` AND ad.grade = $${paramIndex++}`;
                 params.push(grade);
@@ -554,6 +601,8 @@ const AFEController = {
                     ad.session_id ILIKE $${paramIndex} OR
                     ad.student_dummy_id ILIKE $${paramIndex} OR
                     ad.school_name ILIKE $${paramIndex} OR
+                    ad.module_id ILIKE $${paramIndex} OR
+                    ad.module_name ILIKE $${paramIndex} OR
                     ad.city ILIKE $${paramIndex} OR
                     ad.district ILIKE $${paramIndex} OR
                     ad.state ILIKE $${paramIndex} OR
@@ -580,6 +629,8 @@ const AFEController = {
                 session_duration_minutes: 'ad.session_duration_minutes',
                 student_dummy_id: 'ad.student_dummy_id',
                 school_name: 'ad.school_name',
+                module_id: 'ad.module_id',
+                module_name: 'ad.module_name',
                 grade: 'ad.grade'
             };
 
@@ -632,7 +683,7 @@ const AFEController = {
      */
     exportCsv: async (req, res) => {
         try {
-            const { ngoId, deviceId, serialNumber, startDate, endDate, search } = req.query;
+            const { ngoId, deviceId, serialNumber, moduleId, moduleName, startDate, endDate, search } = req.query;
 
             let baseQuery = `
                 FROM afe_details ad
@@ -659,6 +710,16 @@ const AFEController = {
                 params.push(serialNumber);
             }
 
+            if (moduleId) {
+                baseQuery += ` AND ad.module_id = $${paramIndex++}`;
+                params.push(moduleId);
+            }
+
+            if (moduleName) {
+                baseQuery += ` AND ad.module_name ILIKE $${paramIndex++}`;
+                params.push(`%${moduleName}%`);
+            }
+
             if (startDate) {
                 baseQuery += ` AND ad.session_date >= $${paramIndex++}`;
                 params.push(startDate);
@@ -674,6 +735,8 @@ const AFEController = {
                     ad.session_id ILIKE $${paramIndex} OR
                     ad.student_dummy_id ILIKE $${paramIndex} OR
                     ad.school_name ILIKE $${paramIndex} OR
+                    ad.module_id ILIKE $${paramIndex} OR
+                    ad.module_name ILIKE $${paramIndex} OR
                     ad.city ILIKE $${paramIndex} OR
                     ad.district ILIKE $${paramIndex} OR
                     ad.state ILIKE $${paramIndex} OR
