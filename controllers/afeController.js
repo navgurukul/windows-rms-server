@@ -902,49 +902,35 @@ const AFEController = {
                 return res.status(404).json({ error: 'No data found to export' });
             }
 
-            const mappedCsvRows = result.rows.map(row => ({
-                distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform 1',
-                product_name: mapProductNameToCode(row.module_name, row.module_id),
-                country_code: row.country_code || 'IN',
-                underserved_reach: 1, // Single-Option Code: 1: Yes
-                distribution_channel_host: 2, // Single-Option Code: 1: Offline 2: Sama Platform
-                school_year: mapSchoolYearToCode(row.session_date, row.academic_year),
-                state: row.state || '',
-                district: row.district || '',
-                tour_id: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
-                data_collection_method: mapDataCollectionMethodToCode(row.data_collection_method),
-                partner_name: 1, // Single-Option Code: 1: Sama Digital Foundation
-                fy: row.academic_year || '2025-26',
-                month: mapMonthToCode(row.month_name, row.session_date),
-                school_type: mapSchoolTypeToCode(row.school_type),
-                language: mapLanguageToCode(row.language),
-                unit_type: mapUnitTypeToCode(row.unit_type),
-                ben: parseInt(row.student_count, 10) || 1,
-                Completion_date: formatDateToDDMMYYYY(row.submission_date || row.session_date)
-            }));
-
-            const json2csvParser = new Parser({
-                fields: [
-                    'distribution_channel_host_id',
-                    'product_name',
-                    'country_code',
-                    'underserved_reach',
-                    'distribution_channel_host',
-                    'school_year',
-                    'state',
-                    'district',
-                    'tour_id',
-                    'data_collection_method',
-                    'partner_name',
-                    'fy',
-                    'month',
-                    'school_type',
-                    'language',
-                    'unit_type',
-                    'ben',
-                    'Completion_date'
-                ]
+            const mappedCsvRows = result.rows.map(row => {
+                const completionDate = formatDateToDDMMYYYY(row.submission_date || row.session_date);
+                return {
+                    ...row,
+                    country_code: row.country_code || 'IN',
+                    distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform 1',
+                    distribution_channel_host: 2,
+                    underserved_reach: 1,
+                    product_name_code: mapProductNameToCode(row.module_name, row.module_id),
+                    tour_id_code: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
+                    school_year_code: mapSchoolYearToCode(row.session_date, row.academic_year),
+                    month_code: mapMonthToCode(row.month_name, row.session_date),
+                    school_type_code: mapSchoolTypeToCode(row.school_type),
+                    language_code: mapLanguageToCode(row.language),
+                    unit_type_code: mapUnitTypeToCode(row.unit_type),
+                    data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
+                    partner_name_code: 1,
+                    Completion_date: completionDate,
+                    completion_date: completionDate,
+                    profile_name: row.avatar_name || '',
+                    afe_session_id: row.session_id || '',
+                    number_of_videos_watched: row.videos_completed_count || 0,
+                    number_of_tests_attempted: row.quizzes_completed_count || 0,
+                    ben: parseInt(row.student_count, 10) || 1,
+                    fy: row.academic_year || '2025-26'
+                };
             });
+
+            const json2csvParser = new Parser();
             const csvData = json2csvParser.parse(mappedCsvRows);
 
             res.setHeader('Content-Type', 'text/csv');
