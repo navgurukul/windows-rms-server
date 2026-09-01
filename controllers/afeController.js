@@ -275,7 +275,7 @@ const AFEController = {
             const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
             let deviceId = matchedDevice ? matchedDevice.id : null;
             let ngoId = matchedDevice ? matchedDevice.ngo_id : null;
-            let partnerName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : null;
+            let connectedNgoName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : null;
             const hasRms = !!matchedDevice;
 
             await client.query('BEGIN');
@@ -288,14 +288,16 @@ const AFEController = {
                 );
                 if (ngoResult.rows.length > 0) {
                     ngoId = ngoResult.rows[0].id;
-                    if (!partnerName) partnerName = ngoResult.rows[0].NGO_name;
+                    if (!connectedNgoName) connectedNgoName = ngoResult.rows[0].NGO_name;
                 }
             }
 
-            // Fallback partner name from first session if still not set
-            if (!partnerName && sessions.length > 0 && sessions[0].partnerName) {
-                partnerName = sessions[0].partnerName;
-            }
+            // Priority: Connected NGO if assigned and not 'Default NGO'. Otherwise, fallback to session.partnerName or 'Sama Digital Foundation – 1'
+            const isValidConnectedNgo = connectedNgoName && connectedNgoName.trim() !== '' && connectedNgoName !== 'Default NGO';
+            const clientPartnerName = (sessions.length > 0 && sessions[0].partnerName)
+                ? sessions[0].partnerName
+                : 'Sama Digital Foundation – 1';
+            const resolvedPartnerName = isValidConnectedNgo ? connectedNgoName : clientPartnerName;
 
             // 2. Upsert into afe_devices registry
             const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
@@ -328,14 +330,14 @@ const AFEController = {
                         last_synced_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = $15`,
-                    [serialNumber, macAddress, deviceId, ngoId, partnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms, existingAfeDev.rows[0].id]
+                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms, existingAfeDev.rows[0].id]
                 );
             } else {
                 await client.query(
                     `INSERT INTO afe_devices
                     (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, school_udise, state, city, district, district_code, school_type, platform_os, has_rms, last_synced_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)`,
-                    [serialNumber, macAddress, deviceId, ngoId, partnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms]
+                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms]
                 );
             }
 
@@ -343,7 +345,8 @@ const AFEController = {
             const syncedIds = [];
 
             for (const session of sessions) {
-                const sessionPartnerName = partnerName || session.partnerName || 'sama';
+                const sessionClientPartner = session.partnerName || clientPartnerName;
+                const sessionPartnerName = isValidConnectedNgo ? connectedNgoName : sessionClientPartner;
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
@@ -367,7 +370,7 @@ const AFEController = {
                         country_code = COALESCE(EXCLUDED.country_code, afe_details.country_code),
                         distribution_channel_host_id = COALESCE(EXCLUDED.distribution_channel_host_id, afe_details.distribution_channel_host_id),
                         data_collection_method = EXCLUDED.data_collection_method,
-                        partner_name = COALESCE(EXCLUDED.partner_name, afe_details.partner_name),
+                        partner_name = EXCLUDED.partner_name,
                         session_date = EXCLUDED.session_date,
                         academic_year = EXCLUDED.academic_year,
                         month_name = EXCLUDED.month_name,
@@ -761,7 +764,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
@@ -775,7 +779,8 @@ const AFEController = {
                 const completionDateFormatted = formatDateToDDMMYYYY(row.submission_date || row.session_date);
                 return {
                     ...row,
-                    ngo_name: row.ngo_name || '',
+                    ngo_name: row.ngo_name || 'Sama Digital Foundation – 1',
+                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
                     device_id: row.device_id,
                     serial_number: row.serial_number || '',
                     mac_address: row.mac_address || '',
@@ -896,7 +901,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
