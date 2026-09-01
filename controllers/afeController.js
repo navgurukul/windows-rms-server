@@ -640,6 +640,7 @@ const AFEController = {
             let baseQuery = `
                 FROM afe_details ad
                 LEFT JOIN devices d ON ad.device_id = d.id
+                LEFT JOIN afe_devices adev ON (ad.device_id IS NOT NULL AND ad.device_id = adev.device_id)
                 LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
                 LEFT JOIN "NGOs" dn ON d.ngo_id = dn.id
                 WHERE 1=1
@@ -658,8 +659,9 @@ const AFEController = {
             }
 
             if (serialNumber) {
-                baseQuery += ` AND d.serial_number = $${paramIndex++}`;
+                baseQuery += ` AND (d.serial_number = $${paramIndex} OR adev.serial_number = $${paramIndex})`;
                 params.push(serialNumber);
+                paramIndex++;
             }
 
             if (studentDummyId) {
@@ -722,7 +724,8 @@ const AFEController = {
                     ad.school_type ILIKE $${paramIndex} OR
                     ad.avatar_name ILIKE $${paramIndex} OR
                     ad.facilitator_name ILIKE $${paramIndex} OR
-                    d.serial_number ILIKE $${paramIndex}
+                    d.serial_number ILIKE $${paramIndex} OR
+                    adev.serial_number ILIKE $${paramIndex}
                 )`;
                 params.push(`%${search}%`);
                 paramIndex++;
@@ -756,8 +759,8 @@ const AFEController = {
             const selectQuery = `
                 SELECT 
                     ad.*,
-                    d.serial_number,
-                    d.mac_address,
+                    COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
+                    COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
                     COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
@@ -823,6 +826,7 @@ const AFEController = {
             let baseQuery = `
                 FROM afe_details ad
                 LEFT JOIN devices d ON ad.device_id = d.id
+                LEFT JOIN afe_devices adev ON (ad.device_id IS NOT NULL AND ad.device_id = adev.device_id)
                 LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
                 LEFT JOIN "NGOs" dn ON d.ngo_id = dn.id
                 WHERE 1=1
@@ -841,8 +845,9 @@ const AFEController = {
             }
 
             if (serialNumber) {
-                baseQuery += ` AND d.serial_number = $${paramIndex++}`;
+                baseQuery += ` AND (d.serial_number = $${paramIndex} OR adev.serial_number = $${paramIndex})`;
                 params.push(serialNumber);
+                paramIndex++;
             }
 
             if (moduleId) {
@@ -879,7 +884,8 @@ const AFEController = {
                     ad.school_type ILIKE $${paramIndex} OR
                     ad.avatar_name ILIKE $${paramIndex} OR
                     ad.facilitator_name ILIKE $${paramIndex} OR
-                    d.serial_number ILIKE $${paramIndex}
+                    d.serial_number ILIKE $${paramIndex} OR
+                    adev.serial_number ILIKE $${paramIndex}
                 )`;
                 params.push(`%${search}%`);
                 paramIndex++;
@@ -888,8 +894,8 @@ const AFEController = {
             const query = `
                 SELECT 
                     ad.*,
-                    d.serial_number,
-                    d.mac_address,
+                    COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
+                    COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
                     COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
@@ -919,7 +925,6 @@ const AFEController = {
                     unit_type_code: mapUnitTypeToCode(row.unit_type),
                     data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
                     partner_name_code: 1,
-                    Completion_date: completionDate,
                     completion_date: completionDate,
                     profile_name: row.avatar_name || '',
                     afe_session_id: row.session_id || '',
