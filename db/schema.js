@@ -288,8 +288,10 @@ export const afeDetails = pgTable("afe_details", {
     
     sessionId: varchar("session_id", { length: 255 }).notNull(),
     avatarName: varchar("avatar_name", { length: 100 }),
+    countryCode: varchar("country_code", { length: 10 }).default('IN'),
+    distributionChannelHostId: varchar("distribution_channel_host_id", { length: 100 }).default('Sama Platform 1'),
     dataCollectionMethod: varchar("data_collection_method", { length: 100 }).default('Method 2 - Individual Tracking'),
-    partnerName: varchar("partner_name", { length: 100 }).default('sama'),
+    partnerName: varchar("partner_name", { length: 150 }).default('Sama Digital Foundation – 1'),
     sessionDate: varchar("session_date", { length: 10 }).notNull(),
     academicYear: varchar("academic_year", { length: 15 }),
     monthName: varchar("month_name", { length: 20 }),

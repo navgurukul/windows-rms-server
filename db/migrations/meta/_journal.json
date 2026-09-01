@@ -71,6 +71,13 @@
       "when": 1788184856701,
       "tag": "0009_noisy_master_mold",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788247346433,
+      "tag": "0010_workable_mole_man",
+      "breakpoints": true
     }
   ]
 }

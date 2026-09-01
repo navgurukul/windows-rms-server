@@ -2,6 +2,113 @@ const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
 const { Parser } = require('json2csv');
 
+const formatDateToDDMMYYYY = (dateStr) => {
+    if (!dateStr) return '';
+    const str = String(dateStr).trim();
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) return str;
+    const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+        return `${match[3]}/${match[2]}/${match[1]}`;
+    }
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+        const day = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    }
+    return str;
+};
+
+// Option code mappings for CSV export
+const mapProductNameToCode = (val, moduleId) => {
+    const text = `${val || ''} ${moduleId || ''}`.toLowerCase();
+    if (text.includes('music') || text.includes('am') || text.includes('beat') || text.includes('3')) return 3;
+    if (text.includes('robotics') || text.includes('fulfillment') || text.includes('fc') || text.includes('rfc') || text.includes('2')) return 2;
+    return 1; // AWS Data Center Tour
+};
+
+const mapTourIdToCode = (val) => {
+    const text = String(val || '').toLowerCase();
+    if (text.includes('am') || text.includes('music') || text.includes('3')) return 3;
+    if (text.includes('fc') || text.includes('robotics') || text.includes('rfc') || text.includes('2')) return 2;
+    return 1; // CT-L-AWS-01
+};
+
+const mapSchoolYearToCode = (sessionDate, academicYear) => {
+    const text = `${sessionDate || ''} ${academicYear || ''}`;
+    if (text.includes('2028')) return 3;
+    if (text.includes('2027')) return 2;
+    return 1; // 2026
+};
+
+const mapMonthToCode = (monthName, sessionDate) => {
+    const months = {
+        january: 1, jan: 1,
+        february: 2, feb: 2,
+        march: 3, mar: 3,
+        april: 4, apr: 4,
+        may: 5,
+        june: 6, jun: 6,
+        july: 7, jul: 7,
+        august: 8, aug: 8,
+        september: 9, sep: 9, sept: 9,
+        october: 10, oct: 10,
+        november: 11, nov: 11,
+        december: 12, dec: 12
+    };
+    if (monthName && months[String(monthName).toLowerCase().trim()]) {
+        return months[String(monthName).toLowerCase().trim()];
+    }
+    if (sessionDate) {
+        const d = new Date(sessionDate);
+        if (!isNaN(d.getTime())) {
+            return d.getMonth() + 1;
+        }
+    }
+    return 1;
+};
+
+const mapSchoolTypeToCode = (val) => {
+    const text = String(val || '').toLowerCase().trim();
+    if (text.includes('aided')) return 2;
+    if (text.includes('private')) return 3;
+    if (text.includes('kv') || text.includes('jnv') || text.includes('central')) return 4;
+    if (text.includes('tribal') || text.includes('emrs')) return 5;
+    if (text.includes('kgbv')) return 6;
+    if (text.includes('other')) return 7;
+    return 1; // Government School
+};
+
+const mapLanguageToCode = (val) => {
+    const text = String(val || '').toLowerCase().trim();
+    const langMap = {
+        english: 1,
+        hindi: 2,
+        tamil: 3,
+        telugu: 4,
+        kannada: 5,
+        marathi: 6,
+        gujarati: 7,
+        odia: 8,
+        oriya: 8
+    };
+    return langMap[text] || 1;
+};
+
+const mapUnitTypeToCode = (val) => {
+    const text = String(val || '').toLowerCase().trim();
+    if (text.includes('student') && text.includes('teacher')) return 3;
+    if (text.includes('teacher')) return 2;
+    return 1; // Student
+};
+
+const mapDataCollectionMethodToCode = (val) => {
+    const text = String(val || '').toLowerCase().trim();
+    if (text.includes('classroom') || text.includes('aggregate') || text.includes('method 1')) return 1;
+    return 2; // individual_tracking
+};
+
 const AFEController = {
     
     /**
@@ -239,7 +346,7 @@ const AFEController = {
                 const sessionPartnerName = partnerName || session.partnerName || 'sama';
                 const result = await client.query(
                     `INSERT INTO afe_details
-                    (ngo_id, device_id, session_id, data_collection_method, partner_name, session_date,
+                    (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
                      academic_year, month_name, state, city, district, district_code, school_udise, school_name, school_type,
                      grade, student_count, student_dummy_id, class_section, unit_type, tour_type, module_id, module_name, language,
                      delivery_model, session_duration_minutes, csat_avg, itp_avg, nps_score, response_rate_percentage,
@@ -251,11 +358,14 @@ const AFEController = {
                      overall_rating, explore_career_rating, see_more_tours_rating)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58)
+                            $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
+                            $59, $60)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         ngo_id = COALESCE(EXCLUDED.ngo_id, afe_details.ngo_id),
                         device_id = COALESCE(EXCLUDED.device_id, afe_details.device_id),
+                        country_code = COALESCE(EXCLUDED.country_code, afe_details.country_code),
+                        distribution_channel_host_id = COALESCE(EXCLUDED.distribution_channel_host_id, afe_details.distribution_channel_host_id),
                         data_collection_method = EXCLUDED.data_collection_method,
                         partner_name = COALESCE(EXCLUDED.partner_name, afe_details.partner_name),
                         session_date = EXCLUDED.session_date,
@@ -317,6 +427,8 @@ const AFEController = {
                         ngoId,
                         deviceId,
                         session.sessionId,
+                        session.countryCode || 'IN',
+                        session.distributionChannelHostId || 'Sama Platform 1',
                         session.dataCollectionMethod || 'Method 2 - Individual Tracking',
                         sessionPartnerName,
                         session.sessionDate,
@@ -646,7 +758,8 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name, COALESCE(dn."NGO_name", ad.school_name) as school_name
+                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
+                    COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
                 LIMIT $${paramIndex++} OFFSET $${paramIndex++}
@@ -654,6 +767,28 @@ const AFEController = {
             params.push(parsedLimit, offset);
 
             const result = await pool.query(selectQuery, params);
+
+            const formattedRows = result.rows.map(row => {
+                const completionDateFormatted = formatDateToDDMMYYYY(row.submission_date || row.session_date);
+                return {
+                    ...row,
+                    ngo_name: row.ngo_name || '',
+                    device_id: row.device_id,
+                    serial_number: row.serial_number || '',
+                    mac_address: row.mac_address || '',
+                    school_name: row.school_name || '',
+                    session_id: row.session_id || '',
+                    afe_session_id: row.session_id || '',
+                    avatar_name: row.avatar_name || '',
+                    profile_name: row.avatar_name || '',
+                    videos_completed_count: row.videos_completed_count || 0,
+                    quizzes_completed_count: row.quizzes_completed_count || 0,
+                    number_of_videos_watched: row.videos_completed_count || 0,
+                    number_of_tests_attempted: row.quizzes_completed_count || 0,
+                    completion_date: completionDateFormatted,
+                    submission_date: completionDateFormatted
+                };
+            });
 
             res.setHeader('X-Total-Count', total);
 
@@ -666,11 +801,11 @@ const AFEController = {
                         limit: parsedLimit,
                         totalPages: Math.ceil(total / parsedLimit) || 1
                     },
-                    data: result.rows
+                    data: formattedRows
                 });
             }
 
-            res.status(200).json(result.rows);
+            res.status(200).json(formattedRows);
         } catch (error) {
             console.error('[AFE] Error fetching details:', error);
             res.status(500).json({ error: 'Failed to fetch AFE details' });
@@ -755,7 +890,8 @@ const AFEController = {
                     ad.*,
                     d.serial_number,
                     d.mac_address,
-                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name, COALESCE(dn."NGO_name", ad.school_name) as school_name
+                    COALESCE(n."NGO_name", dn."NGO_name", ad.partner_name) as ngo_name,
+                    COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
             `;
@@ -766,8 +902,50 @@ const AFEController = {
                 return res.status(404).json({ error: 'No data found to export' });
             }
 
-            const json2csvParser = new Parser();
-            const csvData = json2csvParser.parse(result.rows);
+            const mappedCsvRows = result.rows.map(row => ({
+                distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform 1',
+                product_name: mapProductNameToCode(row.module_name, row.module_id),
+                country_code: row.country_code || 'IN',
+                underserved_reach: 1, // Single-Option Code: 1: Yes
+                distribution_channel_host: 2, // Single-Option Code: 1: Offline 2: Sama Platform
+                school_year: mapSchoolYearToCode(row.session_date, row.academic_year),
+                state: row.state || '',
+                district: row.district || '',
+                tour_id: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
+                data_collection_method: mapDataCollectionMethodToCode(row.data_collection_method),
+                partner_name: 1, // Single-Option Code: 1: Sama Digital Foundation
+                fy: row.academic_year || '2025-26',
+                month: mapMonthToCode(row.month_name, row.session_date),
+                school_type: mapSchoolTypeToCode(row.school_type),
+                language: mapLanguageToCode(row.language),
+                unit_type: mapUnitTypeToCode(row.unit_type),
+                ben: parseInt(row.student_count, 10) || 1,
+                Completion_date: formatDateToDDMMYYYY(row.submission_date || row.session_date)
+            }));
+
+            const json2csvParser = new Parser({
+                fields: [
+                    'distribution_channel_host_id',
+                    'product_name',
+                    'country_code',
+                    'underserved_reach',
+                    'distribution_channel_host',
+                    'school_year',
+                    'state',
+                    'district',
+                    'tour_id',
+                    'data_collection_method',
+                    'partner_name',
+                    'fy',
+                    'month',
+                    'school_type',
+                    'language',
+                    'unit_type',
+                    'ben',
+                    'Completion_date'
+                ]
+            });
+            const csvData = json2csvParser.parse(mappedCsvRows);
 
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', 'attachment; filename=afe_export.csv');
