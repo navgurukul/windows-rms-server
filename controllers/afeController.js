@@ -419,20 +419,21 @@ const AFEController = {
                         city = COALESCE($9, city),
                         district = COALESCE($10, district),
                         district_code = COALESCE($11, district_code),
-                        school_type = COALESCE($12, school_type),
-                        platform_os = COALESCE($13, platform_os),
-                        has_rms = $14,
+                        zipcode_postal_code = COALESCE($12, zipcode_postal_code),
+                        school_type = COALESCE($13, school_type),
+                        platform_os = COALESCE($14, platform_os),
+                        has_rms = $15,
                         last_synced_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id = $15`,
-                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms, existingAfeDev.rows[0].id]
+                    WHERE id = $16`,
+                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.zipcodePostalCode || firstSession.zipcode_postal_code || '110001', firstSession.schoolType, firstSession.platformOs, hasRms, existingAfeDev.rows[0].id]
                 );
             } else {
                 await client.query(
                     `INSERT INTO afe_devices
-                    (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, school_udise, state, city, district, district_code, school_type, platform_os, has_rms, last_synced_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)`,
-                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.schoolType, firstSession.platformOs, hasRms]
+                    (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, school_udise, state, city, district, district_code, zipcode_postal_code, school_type, platform_os, has_rms, last_synced_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)`,
+                    [serialNumber, macAddress, deviceId, ngoId, resolvedPartnerName, firstSession.schoolName, firstSession.schoolUdise, firstSession.state, firstSession.city, firstSession.district, firstSession.districtCode, firstSession.zipcodePostalCode || firstSession.zipcode_postal_code || '110001', firstSession.schoolType, firstSession.platformOs, hasRms]
                 );
             }
 
@@ -608,7 +609,7 @@ const AFEController = {
                 syncedCount: syncedIds.length,
                 deviceId,
                 ngoId,
-                partnerName,
+                partnerName: resolvedPartnerName,
                 hasRms
             });
         } catch (error) {
