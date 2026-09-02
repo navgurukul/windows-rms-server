@@ -1030,7 +1030,7 @@ const AFEController = {
                 const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : '';
 
                 return {
-                    id: row.student_dummy_id || (row.id ? String(row.id) : ''),
+                    id: row.session_id || (row.id ? String(row.id) : ''),
                     created_at: createdAt,
                     updated_at: updatedAt,
                     device_id: 'sama',
@@ -1042,7 +1042,7 @@ const AFEController = {
                     district_code: row.district_code || '',
                     distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform',
                     product_name: mapProductNameToCode(row.module_name, row.module_id),
-                    unique_student_id: '',
+                    unique_student_id: row.student_dummy_id || '',
                     cc: row.country_code || 'IN',
                     zipcode_postal_code: row.zipcode_postal_code || '110001',
                     completion_date: completionDate,
