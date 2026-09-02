@@ -116,19 +116,55 @@ const AFE_73_FIELDS = [
 ];
 
 // Option code mappings for CSV export
-const mapProductNameToCode = (val, moduleId) => {
-    const text = `${val || ''} ${moduleId || ''}`.toLowerCase();
-    if (text.includes('music') || text.includes('am') || text.includes('beat') || text.includes('3')) return 3;
-    if (text.includes('robotics') || text.includes('fulfillment') || text.includes('fc') || text.includes('rfc') || text.includes('2')) return 2;
-    return 1; // AWS Data Center Tour
+// Tour ID / Product Name Codes:
+// 1: CT-L-AWS-01 (AWS Data Center Tour)
+// 2: CT-L-FC-01 (Amazon Fulfillment Center / Robotics Tour)
+// 3: CT-L-AM-01 (Alexa Music / Your Voice Is Power Tour)
+const mapTourAndProductCode = (moduleName, moduleId, tourType) => {
+    const text = `${moduleName || ''} ${moduleId || ''} ${tourType || ''}`.toLowerCase();
+    
+    // 3: Alexa Music / Your Voice is Power / CT-L-AM-01
+    if (
+        text.includes('music') ||
+        text.includes('alexa') ||
+        text.includes('voice') ||
+        text.includes('beat') ||
+        text.includes('yvip') ||
+        text.includes('ct-l-am') ||
+        /\b(am|am-01|3)\b/i.test(text)
+    ) {
+        return 3;
+    }
+    
+    // 2: Amazon Fulfillment Center / Robotics / CT-L-FC-01
+    if (
+        text.includes('fulfillment') ||
+        text.includes('robotics') ||
+        text.includes('rfc') ||
+        text.includes('ct-l-fc') ||
+        /\b(fc|fc-01|2)\b/i.test(text)
+    ) {
+        return 2;
+    }
+    
+    // 1: AWS Data Center Tour / CT-L-AWS-01
+    return 1;
 };
 
-const mapTourIdToCode = (val) => {
-    const text = String(val || '').toLowerCase();
-    if (text.includes('am') || text.includes('music') || text.includes('3')) return 3;
-    if (text.includes('fc') || text.includes('robotics') || text.includes('rfc') || text.includes('2')) return 2;
-    return 1; // CT-L-AWS-01
+const mapTourCodeToName = (code) => {
+    if (code === 3) return 'CT-L-AM-01';
+    if (code === 2) return 'CT-L-FC-01';
+    return 'CT-L-AWS-01';
 };
+
+const mapTourCodeToProductName = (code) => {
+    if (code === 3) return 'Alexa Music / Your Voice Is Power Tour';
+    if (code === 2) return 'Amazon Fulfillment Center Tour';
+    return 'AWS Data Center Tour';
+};
+
+const mapProductNameToCode = (val, moduleId, tourType) => mapTourAndProductCode(val, moduleId, tourType);
+const mapTourIdToCode = (val, moduleId, tourType) => mapTourAndProductCode(val, moduleId, tourType);
 
 const mapSchoolYearToCode = (sessionDate, academicYear) => {
     const text = `${sessionDate || ''} ${academicYear || ''}`;
@@ -1026,14 +1062,12 @@ const AFEController = {
                 const sessionStartDate = formatDateToMMDDYYYY(row.session_start_date || row.session_date);
                 const sessionEndDate = formatDateToMMDDYYYY(row.session_end_date || row.session_date);
                 const submissionDate = formatDateToMMDDYYYY(row.submission_date || row.session_date);
-
-                const createdAt = row.created_at ? new Date(row.created_at).toISOString() : '';
-                const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : '';
+                const tourCode = mapTourAndProductCode(row.module_name, row.module_id, row.tour_type);
 
                 return {
-                    id: row.session_id || (row.id ? String(row.id) : ''),
-                    created_at: createdAt,
-                    updated_at: updatedAt,
+                    id: '',
+                    created_at: '',
+                    updated_at: '',
                     device_id: 'sama',
                     mobile_created_at: '',
                     mobile_updated_at: '',
@@ -1041,8 +1075,8 @@ const AFEController = {
                     time_taken: '',
                     parent_response_id: '',
                     district_code: row.district_code || '',
-                    distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform',
-                    product_name: mapProductNameToCode(row.module_name, row.module_id),
+                    distribution_channel_host_id: 'Sama Platform',
+                    product_name: tourCode,
                     unique_student_id: row.student_dummy_id || '',
                     cc: row.country_code || 'IN',
                     zipcode_postal_code: row.zipcode_postal_code || '110001',
@@ -1053,7 +1087,7 @@ const AFEController = {
                     grade_of_students: row.grade ? String(row.grade) : '8',
                     educator_id: '',
                     educator_nps: '',
-                    distribution_channel_host: 1,
+                    distribution_channel_host: 2,
                     session_id: row.session_id || '',
                     session_start_date: sessionStartDate,
                     session_end_date: sessionEndDate,
@@ -1065,7 +1099,7 @@ const AFEController = {
                     state: row.state || '',
                     city: row.city || '',
                     district: row.district || '',
-                    tour_id: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
+                    tour_id: tourCode,
                     data_collection_method: mapDataCollectionMethodToCode(row.data_collection_method),
                     partner_name: 1,
                     academic_year: '3ab7f1d4-e2c8-47d9-a1b6-8f0c5d2e9a73',
@@ -1102,7 +1136,7 @@ const AFEController = {
                     platform_version: row.platform_version || '',
                     app_version: row.app_version || '',
                     network_type: row.network_type || '',
-                    data_source: row.data_source || 'Local DB',
+                    data_source: 'AFE CSV Export',
                     submission_date: submissionDate
                 };
             });
@@ -1216,21 +1250,39 @@ const AFEController = {
 
             const mappedCsvRows = result.rows.map(row => {
                 const completionDate = formatDateToDDMMYYYY(row.submission_date || row.session_date);
+                const tourCode = mapTourAndProductCode(row.module_name, row.module_id, row.tour_type);
+                const tourName = mapTourCodeToName(tourCode);
+                const productName = mapTourCodeToProductName(tourCode);
+                const monthCode = mapMonthToCode(row.month_name, row.session_date);
+                const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                const monthName = row.month_name || monthNames[monthCode] || '';
+
                 return {
                     ...row,
+                    tour_name: tourName,
+                    tour_id: tourCode,
+                    tour_id_code: tourCode,
+                    product_name: productName,
+                    product_name_code: tourCode,
+                    module_name: row.module_name || productName,
                     country_code: row.country_code || 'IN',
-                    distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform 1',
+                    distribution_channel_host_id: 'Sama Platform',
                     distribution_channel_host: 2,
                     underserved_reach: 1,
-                    product_name_code: mapProductNameToCode(row.module_name, row.module_id),
-                    tour_id_code: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
                     school_year_code: mapSchoolYearToCode(row.session_date, row.academic_year),
-                    month_code: mapMonthToCode(row.month_name, row.session_date),
+                    month_name: monthName,
+                    month_code: monthCode,
+                    school_type: row.school_type || 'Government School',
                     school_type_code: mapSchoolTypeToCode(row.school_type),
+                    language: row.language || 'English',
                     language_code: mapLanguageToCode(row.language),
+                    unit_type: row.unit_type || 'Modular AFE',
                     unit_type_code: mapUnitTypeToCode(row.unit_type),
+                    data_collection_method: row.data_collection_method || 'Method 2 - Individual Tracking',
                     data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
+                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
                     partner_name_code: 1,
+                    data_source: 'AFE CSV Export',
                     session_start_date: row.session_start_date || row.session_date,
                     session_end_date: row.session_end_date || row.session_date,
                     session_start_time: row.session_start_time || '',
