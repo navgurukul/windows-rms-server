@@ -20,6 +20,101 @@ const formatDateToDDMMYYYY = (dateStr) => {
     return str;
 };
 
+const formatDateToMMDDYYYY = (dateStr) => {
+    if (!dateStr) return '';
+    const str = String(dateStr).trim();
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) return str;
+    const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+        return `${match[2]}-${match[3]}-${match[1]}`;
+    }
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${month}-${day}-${year}`;
+    }
+    return str;
+};
+
+// Exact 73 fields in snake_case required for Amazon Dashboard CSV format
+const AFE_73_FIELDS = [
+    'id',
+    'created_at',
+    'updated_at',
+    'device_id',
+    'mobile_created_at',
+    'mobile_updated_at',
+    'location',
+    'time_taken',
+    'parent_response_id',
+    'district_code',
+    'distribution_channel_host_id',
+    'product_name',
+    'unique_student_id',
+    'cc',
+    'zipcode_postal_code',
+    'completion_date',
+    'completion_rate',
+    'student_csat',
+    'underserved_reach',
+    'grade_of_students',
+    'educator_id',
+    'educator_nps',
+    'distribution_channel_host',
+    'session_id',
+    'session_start_date',
+    'session_end_date',
+    'session_start_time',
+    'session_stop_time',
+    'school_year',
+    'latitude',
+    'longitude',
+    'state',
+    'city',
+    'district',
+    'tour_id',
+    'data_collection_method',
+    'partner_name',
+    'academic_year',
+    'month_name',
+    'school_udise',
+    'school_name',
+    'school_type',
+    'class_section',
+    'language',
+    'unit_type',
+    'student_count',
+    'itp_avg',
+    'session_duration_minutes',
+    'response_rate_percentage',
+    'video_completion_rate',
+    'quiz_accuracy_percentage',
+    'avg_watch_time_seconds',
+    'videos_completed_count',
+    'quizzes_completed_count',
+    'total_questions_answered',
+    'correct_answers_count',
+    'session_completed_flag',
+    'completion_percentage',
+    'total_watch_time_seconds',
+    'avg_playback_speed',
+    'pause_count_total',
+    'seek_count_total',
+    'facilitator_name',
+    'teacher_confidence_rating',
+    'teacher_feedback_text',
+    'implementation_challenges',
+    'device_type',
+    'platform_os',
+    'platform_version',
+    'app_version',
+    'network_type',
+    'data_source',
+    'submission_date'
+];
+
 // Option code mappings for CSV export
 const mapProductNameToCode = (val, moduleId) => {
     const text = `${val || ''} ${moduleId || ''}`.toLowerCase();
@@ -350,7 +445,8 @@ const AFEController = {
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
-                     academic_year, month_name, state, city, district, district_code, school_udise, school_name, school_type,
+                     session_start_date, session_end_date, session_start_time, session_stop_time,
+                     academic_year, month_name, state, city, district, district_code, zipcode_postal_code, school_udise, school_name, school_type,
                      grade, student_count, student_dummy_id, class_section, unit_type, tour_type, module_id, module_name, language,
                      delivery_model, session_duration_minutes, csat_avg, itp_avg, nps_score, response_rate_percentage,
                      video_completion_rate, quiz_accuracy_percentage, avg_watch_time_seconds, videos_completed_count,
@@ -362,7 +458,7 @@ const AFEController = {
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                             $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
                             $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58,
-                            $59, $60)
+                            $59, $60, $61, $62, $63, $64, $65)
                     ON CONFLICT (session_id)
                     DO UPDATE SET
                         ngo_id = COALESCE(EXCLUDED.ngo_id, afe_details.ngo_id),
@@ -372,12 +468,17 @@ const AFEController = {
                         data_collection_method = EXCLUDED.data_collection_method,
                         partner_name = EXCLUDED.partner_name,
                         session_date = EXCLUDED.session_date,
+                        session_start_date = COALESCE(EXCLUDED.session_start_date, afe_details.session_start_date),
+                        session_end_date = COALESCE(EXCLUDED.session_end_date, afe_details.session_end_date),
+                        session_start_time = COALESCE(EXCLUDED.session_start_time, afe_details.session_start_time),
+                        session_stop_time = COALESCE(EXCLUDED.session_stop_time, afe_details.session_stop_time),
                         academic_year = EXCLUDED.academic_year,
                         month_name = EXCLUDED.month_name,
                         state = EXCLUDED.state,
                         city = EXCLUDED.city,
                         district = EXCLUDED.district,
                         district_code = EXCLUDED.district_code,
+                        zipcode_postal_code = COALESCE(EXCLUDED.zipcode_postal_code, afe_details.zipcode_postal_code),
                         school_udise = EXCLUDED.school_udise,
                         school_name = EXCLUDED.school_name,
                         school_type = EXCLUDED.school_type,
@@ -435,12 +536,17 @@ const AFEController = {
                         session.dataCollectionMethod || 'Method 2 - Individual Tracking',
                         sessionPartnerName,
                         session.sessionDate,
+                        session.sessionStartDate || session.session_start_date || session.sessionDate || null,
+                        session.sessionEndDate || session.session_end_date || session.sessionDate || null,
+                        session.sessionStartTime || session.session_start_time || null,
+                        session.sessionStopTime || session.session_stop_time || null,
                         session.academicYear,
                         session.monthName,
                         session.state,
                         session.city || null,
                         session.district,
                         session.districtCode || null,
+                        session.zipcodePostalCode || session.zipcode_postal_code || '110001',
                         session.schoolUdise || null,
                         session.schoolName,
                         session.schoolType || 'Government School',
@@ -821,10 +927,203 @@ const AFEController = {
     },
 
     /**
-     * Export AFE details as CSV
+     * Export AFE details as CSV (73-Column Amazon Dashboard Standard Format)
      * GET /api/afe/export-csv?ngoId=<id>&deviceId=<id>&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>
      */
     exportCsv: async (req, res) => {
+        try {
+            const { ngoId, deviceId, serialNumber, moduleId, moduleName, startDate, endDate, search } = req.query;
+
+            let baseQuery = `
+                FROM afe_details ad
+                LEFT JOIN devices d ON ad.device_id = d.id
+                LEFT JOIN afe_devices adev ON (ad.device_id IS NOT NULL AND ad.device_id = adev.device_id)
+                LEFT JOIN "NGOs" n ON ad.ngo_id = n.id
+                LEFT JOIN "NGOs" dn ON d.ngo_id = dn.id
+                WHERE 1=1
+            `;
+            const params = [];
+            let paramIndex = 1;
+
+            if (ngoId) {
+                baseQuery += ` AND ad.ngo_id = $${paramIndex++}`;
+                params.push(ngoId);
+            }
+
+            if (deviceId) {
+                baseQuery += ` AND ad.device_id = $${paramIndex++}`;
+                params.push(deviceId);
+            }
+
+            if (serialNumber) {
+                baseQuery += ` AND (d.serial_number = $${paramIndex} OR adev.serial_number = $${paramIndex})`;
+                params.push(serialNumber);
+                paramIndex++;
+            }
+
+            if (moduleId) {
+                baseQuery += ` AND ad.module_id = $${paramIndex++}`;
+                params.push(moduleId);
+            }
+
+            if (moduleName) {
+                baseQuery += ` AND ad.module_name ILIKE $${paramIndex++}`;
+                params.push(`%${moduleName}%`);
+            }
+
+            if (startDate) {
+                baseQuery += ` AND ad.session_date >= $${paramIndex++}`;
+                params.push(startDate);
+            }
+
+            if (endDate) {
+                baseQuery += ` AND ad.session_date <= $${paramIndex++}`;
+                params.push(endDate);
+            }
+
+            if (search) {
+                baseQuery += ` AND (
+                    ad.session_id ILIKE $${paramIndex} OR
+                    ad.student_dummy_id ILIKE $${paramIndex} OR
+                    ad.school_name ILIKE $${paramIndex} OR
+                    ad.module_id ILIKE $${paramIndex} OR
+                    ad.module_name ILIKE $${paramIndex} OR
+                    ad.city ILIKE $${paramIndex} OR
+                    ad.district ILIKE $${paramIndex} OR
+                    ad.state ILIKE $${paramIndex} OR
+                    ad.district_code ILIKE $${paramIndex} OR
+                    ad.school_type ILIKE $${paramIndex} OR
+                    ad.avatar_name ILIKE $${paramIndex} OR
+                    ad.facilitator_name ILIKE $${paramIndex} OR
+                    d.serial_number ILIKE $${paramIndex} OR
+                    adev.serial_number ILIKE $${paramIndex}
+                )`;
+                params.push(`%${search}%`);
+                paramIndex++;
+            }
+
+            const query = `
+                SELECT 
+                    ad.*,
+                    COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
+                    COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(ad.school_name, dn."NGO_name") as school_name
+                ${baseQuery}
+                ORDER BY ad.session_date DESC, ad.student_dummy_id
+            `;
+
+            const result = await pool.query(query, params);
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'No data found to export' });
+            }
+
+            const mapped73Rows = result.rows.map(row => {
+                const completionDate = formatDateToMMDDYYYY(row.session_date || row.submission_date);
+                const sessionStartDate = formatDateToMMDDYYYY(row.session_start_date || row.session_date);
+                const sessionEndDate = formatDateToMMDDYYYY(row.session_end_date || row.session_date);
+                const submissionDate = formatDateToMMDDYYYY(row.submission_date || row.session_date);
+
+                const createdAt = row.created_at ? new Date(row.created_at).toISOString() : '';
+                const updatedAt = row.updated_at ? new Date(row.updated_at).toISOString() : '';
+
+                return {
+                    id: row.student_dummy_id || (row.id ? String(row.id) : ''),
+                    created_at: createdAt,
+                    updated_at: updatedAt,
+                    device_id: 'sama',
+                    mobile_created_at: '',
+                    mobile_updated_at: '',
+                    location: '',
+                    time_taken: '',
+                    parent_response_id: '',
+                    district_code: row.district_code || '',
+                    distribution_channel_host_id: row.distribution_channel_host_id || 'Sama Platform',
+                    product_name: mapProductNameToCode(row.module_name, row.module_id),
+                    unique_student_id: '',
+                    cc: row.country_code || 'IN',
+                    zipcode_postal_code: row.zipcode_postal_code || '110001',
+                    completion_date: completionDate,
+                    completion_rate: row.video_completion_rate !== null && row.video_completion_rate !== undefined ? Number(row.video_completion_rate) : 0,
+                    student_csat: row.csat_avg !== null && row.csat_avg !== undefined && row.csat_avg !== '' ? Number(row.csat_avg) : '',
+                    underserved_reach: 1,
+                    grade_of_students: row.grade ? String(row.grade) : '8',
+                    educator_id: '',
+                    educator_nps: '',
+                    distribution_channel_host: 1,
+                    session_id: row.session_id || '',
+                    session_start_date: sessionStartDate,
+                    session_end_date: sessionEndDate,
+                    session_start_time: row.session_start_time || '',
+                    session_stop_time: row.session_stop_time || '',
+                    school_year: mapSchoolYearToCode(row.session_date, row.academic_year),
+                    latitude: '',
+                    longitude: '',
+                    state: row.state || '',
+                    city: row.city || '',
+                    district: row.district || '',
+                    tour_id: mapTourIdToCode(row.module_id || row.tour_type || row.module_name),
+                    data_collection_method: mapDataCollectionMethodToCode(row.data_collection_method),
+                    partner_name: 1,
+                    academic_year: '3ab7f1d4-e2c8-47d9-a1b6-8f0c5d2e9a73',
+                    month_name: mapMonthToCode(row.month_name, row.session_date),
+                    school_udise: row.school_udise || '',
+                    school_name: row.school_name || '',
+                    school_type: mapSchoolTypeToCode(row.school_type),
+                    class_section: '',
+                    language: mapLanguageToCode(row.language),
+                    unit_type: mapUnitTypeToCode(row.unit_type),
+                    student_count: parseInt(row.student_count, 10) || 1,
+                    itp_avg: row.itp_avg ? Math.round(Number(row.itp_avg)) : 4,
+                    session_duration_minutes: parseInt(row.session_duration_minutes, 10) || 0,
+                    response_rate_percentage: row.response_rate_percentage !== null && row.response_rate_percentage !== undefined ? Number(row.response_rate_percentage) : 100,
+                    video_completion_rate: row.video_completion_rate !== null && row.video_completion_rate !== undefined ? Number(row.video_completion_rate) : 0,
+                    quiz_accuracy_percentage: row.quiz_accuracy_percentage !== null && row.quiz_accuracy_percentage !== undefined ? Number(row.quiz_accuracy_percentage) : 0,
+                    avg_watch_time_seconds: parseInt(row.avg_watch_time_seconds, 10) || 0,
+                    videos_completed_count: parseInt(row.videos_completed_count, 10) || 0,
+                    quizzes_completed_count: parseInt(row.quizzes_completed_count, 10) || 0,
+                    total_questions_answered: parseInt(row.total_questions_answered, 10) || 0,
+                    correct_answers_count: parseInt(row.correct_answers_count, 10) || 0,
+                    session_completed_flag: row.session_completed_flag ? 'TRUE' : 'FALSE',
+                    completion_percentage: parseInt(row.completion_percentage, 10) || 0,
+                    total_watch_time_seconds: parseInt(row.total_watch_time_seconds, 10) || 0,
+                    avg_playback_speed: row.avg_playback_speed !== null && row.avg_playback_speed !== undefined ? Number(row.avg_playback_speed) : 1.0,
+                    pause_count_total: parseInt(row.pause_count_total, 10) || 0,
+                    seek_count_total: parseInt(row.seek_count_total, 10) || 0,
+                    facilitator_name: '',
+                    teacher_confidence_rating: '',
+                    teacher_feedback_text: '',
+                    implementation_challenges: '',
+                    device_type: row.device_type || 'Laptop',
+                    platform_os: row.platform_os || '',
+                    platform_version: row.platform_version || '',
+                    app_version: row.app_version || '',
+                    network_type: row.network_type || '',
+                    data_source: row.data_source || 'Local DB',
+                    submission_date: submissionDate
+                };
+            });
+
+            const json2csvParser = new Parser({ fields: AFE_73_FIELDS });
+            const csvData = json2csvParser.parse(mapped73Rows);
+
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=afe_export.csv');
+            res.status(200).send(csvData);
+
+        } catch (error) {
+            console.error('[AFE] Error exporting CSV:', error);
+            res.status(500).json({ error: 'Failed to export CSV' });
+        }
+    },
+
+    /**
+     * Export AFE details as CSV (Legacy 85-Column Format)
+     * GET /api/afe/export-csv-legacy?ngoId=<id>&deviceId=<id>&startDate=<YYYY-MM-DD>&endDate=<YYYY-MM-DD>
+     */
+    exportCsvLegacy: async (req, res) => {
         try {
             const { ngoId, deviceId, serialNumber, moduleId, moduleName, startDate, endDate, search } = req.query;
 
@@ -931,6 +1230,10 @@ const AFEController = {
                     unit_type_code: mapUnitTypeToCode(row.unit_type),
                     data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
                     partner_name_code: 1,
+                    session_start_date: row.session_start_date || row.session_date,
+                    session_end_date: row.session_end_date || row.session_date,
+                    session_start_time: row.session_start_time || '',
+                    session_stop_time: row.session_stop_time || '',
                     completion_date: completionDate,
                     profile_name: row.avatar_name || '',
                     afe_session_id: row.session_id || '',
@@ -945,12 +1248,12 @@ const AFEController = {
             const csvData = json2csvParser.parse(mappedCsvRows);
 
             res.setHeader('Content-Type', 'text/csv');
-            res.setHeader('Content-Disposition', 'attachment; filename=afe_export.csv');
+            res.setHeader('Content-Disposition', 'attachment; filename=afe_export_legacy.csv');
             res.status(200).send(csvData);
 
         } catch (error) {
-            console.error('[AFE] Error exporting CSV:', error);
-            res.status(500).json({ error: 'Failed to export CSV' });
+            console.error('[AFE] Error exporting legacy CSV:', error);
+            res.status(500).json({ error: 'Failed to export legacy CSV' });
         }
     }
 };

@@ -8,5 +8,6 @@ router.post('/backfill-historical', AFEController.backfillHistoricalData);
 router.get('/overview', AFEController.getOverview);
 router.get('/details', AFEController.getDetails);
 router.get('/export-csv', AFEController.exportCsv);
+router.get('/export-csv-legacy', AFEController.exportCsvLegacy);
 
 module.exports = router;
