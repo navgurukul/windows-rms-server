@@ -205,6 +205,7 @@ const DeviceModel = {
             LEFT JOIN donors don ON d.donor_id = don.id
             LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
             WHERE d.mac_address = $1
+               OR LOWER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = LOWER(REPLACE(REPLACE($1, ':', ''), '-', ''))
             GROUP BY d.id, n."NGO_name", don.donor_name
         `;
         const result = await pool.query(query, [mac_address]);

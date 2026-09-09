@@ -2,6 +2,7 @@ const axios = require('axios');
 const DeviceModel = require('../models/deviceModel');
 const DonorModel = require('../models/donorModel');
 const NgoModel = require('../models/ngoModel');
+const { pool } = require('../config/database');
 
 const DeviceController = {
     registerDevice: async (req, res) => {
@@ -98,7 +99,52 @@ const DeviceController = {
                 console.error(`Error fetching device data from Google Script for ${serial_number}:`, apiError.message);
             }
 
-            const device = await DeviceModel.create(username, serial_number, mac_address, location, rms_version, ngo_id, donor_id);
+            // Check if afe_devices already has a verified serial number for this MAC address
+            const normalizedMac = mac_address ? mac_address.replace(/[:-]/g, '').toLowerCase() : null;
+            let effectiveSerial = serial_number;
+            if (normalizedMac) {
+                try {
+                    const afeRes = await pool.query(
+                        `SELECT * FROM afe_devices 
+                         WHERE LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $1 
+                         LIMIT 1`,
+                        [normalizedMac]
+                    );
+                    const existingAfeDev = afeRes.rows[0];
+                    if (existingAfeDev && existingAfeDev.serial_number && !isFallbackSerial(existingAfeDev.serial_number)) {
+                        if (isFallbackSerial(serial_number) || serial_number !== existingAfeDev.serial_number) {
+                            console.log(`[RMS] Adopting verified serial from afe_devices: ${existingAfeDev.serial_number} (incoming was ${serial_number})`);
+                            effectiveSerial = existingAfeDev.serial_number;
+                        }
+                    }
+                } catch (afeErr) {
+                    console.warn('[RMS] Error checking afe_devices during registration:', afeErr.message);
+                }
+            }
+
+            const device = await DeviceModel.create(username, effectiveSerial, mac_address, location, rms_version, ngo_id, donor_id);
+
+            // Link afe_devices and retroactively link afe_details
+            if (device && device.id && normalizedMac) {
+                try {
+                    await pool.query(
+                        `UPDATE afe_devices SET device_id = $1, has_rms = true, updated_at = CURRENT_TIMESTAMP
+                         WHERE LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $2`,
+                        [device.id, normalizedMac]
+                    );
+                    await pool.query(
+                        `UPDATE afe_details SET device_id = $1
+                         WHERE device_id IS NULL AND (
+                            school_name IN (SELECT school_name FROM afe_devices WHERE device_id = $1)
+                            OR partner_name IN (SELECT partner_name FROM afe_devices WHERE device_id = $1)
+                         )`,
+                        [device.id]
+                    );
+                } catch (linkErr) {
+                    console.warn('[RMS] Error linking afe_devices/afe_details during registration:', linkErr.message);
+                }
+            }
+
             return res.status(201).json(device);
         } catch (error) {
             console.error('Error registering device:', error);
@@ -141,6 +187,22 @@ const DeviceController = {
         catch (error) {
             console.error('Error fetching device by serial number:', error);
             return res.status(500).json({ error: 'Failed to fetch device by serial number' });
+        }
+    },
+
+    getDeviceByMacAddress: async (req, res) => {
+        try {
+            const { mac_address } = req.params;
+            const device = await DeviceModel.getByMacAddress(mac_address);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(device);
+        } catch (error) {
+            console.error('Error fetching device by MAC address:', error);
+            return res.status(500).json({ error: 'Failed to fetch device by MAC address' });
         }
     },
 

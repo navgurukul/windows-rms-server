@@ -76,6 +76,40 @@ const NGOModel = {
     delete: async (id) => {
         const result = await pool.query('DELETE FROM "NGOs" WHERE id = $1 RETURNING *', [id]);
         return result.rows[0];
+    },
+
+    reconcileWithSama: async (NGOName, samaKey) => {
+        if (!NGOName || !NGOName.trim()) return null;
+        const cleanName = NGOName.trim();
+        // Check it all small cases, remove all spaces and "."s and then check the name
+        const normalizedTarget = cleanName.toLowerCase().replace(/[\s.]+/g, '');
+
+        const allNgos = await pool.query('SELECT * FROM "NGOs"');
+        const existing = allNgos.rows.find(n => {
+            const norm = (n.NGO_name || '').toLowerCase().replace(/[\s.]+/g, '');
+            return norm === normalizedTarget;
+        });
+
+        if (existing) {
+            const currentKey = (existing.unique_key || '').trim().toLowerCase();
+            // If present and the unique key is not starting with sama (or sam) as in the API, update it
+            if (samaKey && !currentKey.startsWith('sam')) {
+                const updateResult = await pool.query(
+                    'UPDATE "NGOs" SET unique_key = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+                    [samaKey.trim(), existing.id]
+                );
+                return updateResult.rows[0];
+            }
+            return existing;
+        } else {
+            // If not present, add it
+            const keyToUse = (samaKey && samaKey.trim()) ? samaKey.trim() : await generateUniqueNGOKey(pool);
+            const insertResult = await pool.query(
+                'INSERT INTO "NGOs" ("NGO_name", unique_key, is_active) VALUES ($1, $2, $3) RETURNING *',
+                [cleanName, keyToUse, true]
+            );
+            return insertResult.rows[0];
+        }
     }
 };
 

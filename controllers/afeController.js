@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
+const NGOModel = require('../models/ngoModel');
 const { Parser } = require('json2csv');
 
 const formatDateToDDMMYYYY = (dateStr) => {
@@ -276,6 +277,186 @@ const AFEController = {
     },
 
     /**
+     * Reconcile/sync NGO with Sama API key and ensure presence in NGOs table
+     * POST /api/afe/sync-ngo
+     * Body: { ngoName, ngoKey }
+     */
+    syncNGO: async (req, res) => {
+        try {
+            const { ngoName, ngoKey } = req.body;
+            if (!ngoName || !ngoName.trim()) {
+                return res.status(400).json({ error: 'Missing ngoName' });
+            }
+            const ngo = await NGOModel.reconcileWithSama(ngoName.trim(), ngoKey);
+            return res.status(200).json({
+                success: true,
+                ngo
+            });
+        } catch (error) {
+            console.error('[AFE] Error syncing NGO:', error);
+            return res.status(500).json({ error: 'Failed to sync NGO' });
+        }
+    },
+
+    /**
+     * Check device registration status in RMS devices and afe_devices
+     * POST /api/afe/check-device
+     * Body: { macAddress, serialNumber }
+     */
+    checkDeviceStatus: async (req, res) => {
+        try {
+            const { macAddress, serialNumber } = req.body;
+            if (!macAddress && !serialNumber) {
+                return res.status(400).json({ error: 'Missing macAddress or serialNumber' });
+            }
+
+            // 1. Check in RMS devices table (Priority: MAC, then Serial)
+            const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
+
+            // 2. Check in afe_devices table
+            const normalizedMac = macAddress ? macAddress.replace(/[:-]/g, '').toLowerCase() : null;
+            const afeDevRes = await pool.query(
+                `SELECT * FROM afe_devices 
+                 WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $1)
+                    OR (serial_number IS NOT NULL AND UPPER(TRIM(serial_number)) = UPPER(TRIM($2)))
+                 LIMIT 1`,
+                [normalizedMac, serialNumber || '']
+            );
+            const afeDevice = afeDevRes.rows[0] || null;
+
+            return res.status(200).json({
+                success: true,
+                isRegisteredInRms: !!matchedDevice,
+                rmsDevice: matchedDevice ? {
+                    id: matchedDevice.id,
+                    serialNumber: matchedDevice.serial_number,
+                    macAddress: matchedDevice.mac_address,
+                    ngoName: matchedDevice.ngo_name
+                } : null,
+                isRegisteredInAfe: !!afeDevice,
+                afeDevice: afeDevice ? {
+                    id: afeDevice.id,
+                    serialNumber: afeDevice.serial_number,
+                    macAddress: afeDevice.mac_address,
+                    deviceId: afeDevice.device_id,
+                    hasRms: afeDevice.has_rms,
+                    partnerName: afeDevice.partner_name,
+                    schoolName: afeDevice.school_name
+                } : null
+            });
+        } catch (error) {
+            console.error('[AFE] Error checking device status:', error);
+            return res.status(500).json({ error: 'Failed to check device status' });
+        }
+    },
+
+    /**
+     * Reconcile device hardware identifiers with RMS and AFE registries
+     * POST /api/afe/reconcile-device
+     * Body: { macAddress, serialNumber, oldSerialNumber, schoolName, partnerName, ngoKey }
+     */
+    reconcileDevice: async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const { macAddress, serialNumber, oldSerialNumber, schoolName, partnerName, ngoKey } = req.body;
+            if (!serialNumber || !serialNumber.trim()) {
+                return res.status(400).json({ error: 'serialNumber is required' });
+            }
+
+            const cleanSerial = serialNumber.trim();
+            const normalizedMac = macAddress ? macAddress.replace(/[:-]/g, '').toLowerCase() : null;
+
+            await client.query('BEGIN');
+
+            // 1. Locate device in RMS devices table (Priority: MAC, then serial)
+            let matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, oldSerialNumber || cleanSerial);
+            let deviceId = matchedDevice ? matchedDevice.id : null;
+            let ngoId = matchedDevice ? matchedDevice.ngo_id : null;
+
+            // Reconcile NGO if partnerName / ngoKey provided
+            if (partnerName && !ngoId) {
+                try {
+                    const reconciledNgo = await NGOModel.reconcileWithSama(partnerName, ngoKey);
+                    if (reconciledNgo) ngoId = reconciledNgo.id;
+                } catch (e) {
+                    console.warn('[AFE] NGO reconcile warning in reconcileDevice:', e.message);
+                }
+            }
+
+            // If matched in RMS devices table, update the serial number and mac address
+            if (matchedDevice) {
+                await client.query(
+                    `UPDATE devices SET
+                        serial_number = $1,
+                        mac_address = COALESCE($2, mac_address)
+                     WHERE id = $3`,
+                    [cleanSerial, macAddress || matchedDevice.mac_address, matchedDevice.id]
+                );
+            }
+
+            // 2. Upsert into afe_devices
+            const existingAfe = await client.query(
+                `SELECT id FROM afe_devices
+                 WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $1)
+                    OR (serial_number IS NOT NULL AND (UPPER(TRIM(serial_number)) = UPPER(TRIM($2)) OR UPPER(TRIM(serial_number)) = UPPER(TRIM($3))))
+                 LIMIT 1`,
+                [normalizedMac, cleanSerial, oldSerialNumber || '']
+            );
+
+            if (existingAfe.rows.length > 0) {
+                await client.query(
+                    `UPDATE afe_devices SET
+                        serial_number = $1,
+                        mac_address = COALESCE($2, mac_address),
+                        device_id = COALESCE($3, device_id),
+                        ngo_id = COALESCE($4, ngo_id),
+                        partner_name = COALESCE($5, partner_name),
+                        school_name = COALESCE($6, school_name),
+                        has_rms = $7,
+                        updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $8`,
+                    [cleanSerial, macAddress, deviceId, ngoId, partnerName, schoolName, !!matchedDevice, existingAfe.rows[0].id]
+                );
+            } else {
+                await client.query(
+                    `INSERT INTO afe_devices
+                     (serial_number, mac_address, device_id, ngo_id, partner_name, school_name, has_rms, last_synced_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+                    [cleanSerial, macAddress, deviceId, ngoId, partnerName, schoolName, !!matchedDevice]
+                );
+            }
+
+            // 3. If deviceId is known, link any existing unlinked afe_details records
+            if (deviceId) {
+                await client.query(
+                    `UPDATE afe_details SET
+                        device_id = $1,
+                        ngo_id = COALESCE(ngo_id, $2)
+                     WHERE device_id IS NULL
+                       AND (school_name = $3 OR partner_name = $4)`,
+                    [deviceId, ngoId, schoolName || '', partnerName || '']
+                );
+            }
+
+            await client.query('COMMIT');
+
+            return res.status(200).json({
+                success: true,
+                isRegisteredInRms: !!matchedDevice,
+                deviceId,
+                serialNumber: cleanSerial,
+                macAddress
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[AFE] Error reconciling device:', error);
+            return res.status(500).json({ error: 'Failed to reconcile device' });
+        } finally {
+            client.release();
+        }
+    },
+
+    /**
      * One-time historical backfill endpoint
      * POST /api/afe/backfill-historical
      * Body: { macAddress, serialNumber, sessionIds: [...] }
@@ -411,8 +592,19 @@ const AFEController = {
 
             await client.query('BEGIN');
 
-            // 1. If NGO key is provided and valid, it can supplement or validate NGO
-            if (ngoKey && !ngoId) {
+            // 1. If client partner name and/or NGO key is provided, reconcile and link NGO
+            const rawPartner = (sessions.length > 0 && sessions[0].partnerName) ? sessions[0].partnerName : null;
+            if (rawPartner && !ngoId) {
+                try {
+                    const reconciled = await NGOModel.reconcileWithSama(rawPartner, ngoKey);
+                    if (reconciled) {
+                        ngoId = reconciled.id;
+                        if (!connectedNgoName) connectedNgoName = reconciled.NGO_name;
+                    }
+                } catch (recErr) {
+                    console.warn('[AFE] NGO reconciliation warning during sync:', recErr.message);
+                }
+            } else if (ngoKey && !ngoId) {
                 const ngoResult = await client.query(
                     'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
                     [ngoKey]
@@ -771,6 +963,8 @@ const AFEController = {
                 schoolName,
                 moduleId,
                 moduleName,
+                tourId,
+                courseId,
                 grade,
                 sessionCompleted,
                 startDate,
@@ -825,9 +1019,22 @@ const AFEController = {
                 params.push(`%${schoolName}%`);
             }
 
-            if (moduleId) {
-                baseQuery += ` AND ad.module_id = $${paramIndex++}`;
-                params.push(moduleId);
+            const effectiveModuleOrCourseId = moduleId || courseId;
+            if (effectiveModuleOrCourseId) {
+                baseQuery += ` AND (ad.module_id = $${paramIndex} OR ad.module_name ILIKE $${paramIndex + 1})`;
+                params.push(effectiveModuleOrCourseId, `%${effectiveModuleOrCourseId}%`);
+                paramIndex += 2;
+            }
+
+            if (tourId) {
+                const tid = String(tourId).trim();
+                if (tid === '1' || tid.toLowerCase().includes('aws') || tid.toLowerCase().includes('dct')) {
+                    baseQuery += ` AND (ad.module_name ILIKE '%aws%' OR ad.module_id ILIKE '%dct%' OR ad.module_name ILIKE '%data center%')`;
+                } else if (tid === '2' || tid.toLowerCase().includes('fc') || tid.toLowerCase().includes('robotics') || tid.toLowerCase().includes('fulfillment')) {
+                    baseQuery += ` AND (ad.module_name ILIKE '%fulfillment%' OR ad.module_name ILIKE '%robotics%' OR ad.module_id ILIKE '%fc%')`;
+                } else if (tid === '3' || tid.toLowerCase().includes('am') || tid.toLowerCase().includes('alexa') || tid.toLowerCase().includes('music') || tid.toLowerCase().includes('voice')) {
+                    baseQuery += ` AND (ad.module_name ILIKE '%music%' OR ad.module_name ILIKE '%alexa%' OR ad.module_id ILIKE '%am%' OR ad.module_name ILIKE '%voice%')`;
+                }
             }
 
             if (moduleName) {
@@ -920,8 +1127,21 @@ const AFEController = {
 
             const formattedRows = result.rows.map(row => {
                 const completionDateFormatted = formatDateToDDMMYYYY(row.submission_date || row.session_date);
+                const tourCode = mapTourAndProductCode(row.module_name, row.module_id, row.tour_type);
+                const tourCodeName = mapTourCodeToName(tourCode);
+                const tourProductName = mapTourCodeToProductName(tourCode);
+                const effectiveCourseId = row.module_id || tourCodeName;
+                const effectiveTourName = (row.module_name && row.module_name !== 'Virtual') ? row.module_name : tourProductName;
+
                 return {
                     ...row,
+                    tour_id: tourCode,
+                    tour_code: tourCodeName,
+                    tour_name: effectiveTourName,
+                    product_name: tourCode,
+                    course_id: effectiveCourseId,
+                    module_id: effectiveCourseId,
+                    module_name: effectiveTourName,
                     ngo_name: row.ngo_name || 'Sama Digital Foundation – 1',
                     partner_name: row.partner_name || 'Sama Digital Foundation – 1',
                     device_id: row.device_id,
