@@ -91,7 +91,7 @@ const DeviceModel = {
             LEFT JOIN donors don ON d.donor_id = don.id
             LEFT JOIN laptop_tracking lt ON d.id = lt.device_id
             GROUP BY d.id, n."NGO_name", don.donor_name
-            ORDER BY d.id
+            ORDER BY d.created_at DESC NULLS LAST, d.id DESC
         `;
         const result = await pool.query(query);
         return result.rows;
