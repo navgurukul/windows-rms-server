@@ -1,0 +1,1 @@
+ALTER TABLE "softwares" ADD COLUMN "is_portable" boolean DEFAULT false;

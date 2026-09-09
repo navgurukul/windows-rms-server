@@ -1,0 +1,2 @@
+ALTER TABLE "afe_details" ADD COLUMN "zipcode_postal_code" varchar(20) DEFAULT '110001';--> statement-breakpoint
+ALTER TABLE "afe_devices" ADD COLUMN "zipcode_postal_code" varchar(20) DEFAULT '110001';

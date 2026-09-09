@@ -12,6 +12,9 @@ router.post('/bulk-sync', laptopTrackingController.bulkSyncLaptopData);
 // GET endpoint to get daily usage statistics by username
 router.get('/usage/:username', laptopTrackingController.getDailyUsage);
 
+// GET endpoint to get high-level tracking overview and metrics
+router.get('/overview', laptopTrackingController.getTrackingOverview);
+
 // GET endpoint to get all data from database
 router.get('/all', laptopTrackingController.getAllData);
 

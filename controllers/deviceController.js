@@ -1,29 +1,264 @@
+const axios = require('axios');
 const DeviceModel = require('../models/deviceModel');
+const DonorModel = require('../models/donorModel');
+const NgoModel = require('../models/ngoModel');
+const { pool } = require('../config/database');
 
 const DeviceController = {
     registerDevice: async (req, res) => {
         try {
-            const { hostname, device_name } = req.body;
-            
-            if (!hostname || !device_name) {
-                return res.status(400).json({ error: 'Hostname and device_name are required' });
+            const { username, serial_number, mac_address, location, rms_version } = req.body;
+
+            if (!username || !serial_number || !mac_address || !location) {
+                return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
             }
-            
-            const device = await DeviceModel.create(hostname, device_name);
-            res.status(201).json(device);
+
+            // Helper to classify fallback serial numbers
+            const isFallbackSerial = (s) => {
+                if (!s) return true;
+                const upper = String(s).trim().toUpperCase();
+                return upper.startsWith('WIN-') || upper.startsWith('FP-') || upper.startsWith('NG-') || upper === 'UNKNOWN' || upper === 'N/A';
+            };
+
+            // 1. Search by serial number
+            let existingDevice = await DeviceModel.getBySerialNumber(serial_number);
+            if (existingDevice) {
+                console.log(`Device found by serial number: ${serial_number}. Updating details if changed.`);
+                existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                    username,
+                    mac_address,
+                    location,
+                    rms_version
+                });
+                return res.status(200).json(existingDevice);
+            }
+
+            // 2. Search by MAC address
+            existingDevice = await DeviceModel.getByMacAddress(mac_address);
+            if (existingDevice) {
+                console.log(`Device found by MAC address: ${mac_address}. Current Serial in DB: ${existingDevice.serial_number}, Incoming Serial: ${serial_number}`);
+                
+                const existingIsFallback = isFallbackSerial(existingDevice.serial_number);
+                const incomingIsFallback = isFallbackSerial(serial_number);
+
+                if (existingIsFallback && !incomingIsFallback) {
+                    console.log(`Upgrading fallback serial ${existingDevice.serial_number} to hardware serial ${serial_number} in DB.`);
+                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                        serial_number,
+                        username,
+                        location,
+                        rms_version
+                    });
+                } else {
+                    console.log(`Keeping existing serial ${existingDevice.serial_number} in DB. Updating other details.`);
+                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                        username,
+                        location,
+                        rms_version
+                    });
+                }
+                return res.status(200).json(existingDevice);
+            }
+
+
+            // Fetch donor and ngo information from Google Apps Script API
+            let donor_id = null;
+            let ngo_id = null;
+
+            try {
+                const apiUrl = `https://script.google.com/macros/s/AKfycbyNAvN4kwWEkeRQFVKXtZaUI8ijRakGxWJQB-XgabrPtrZosS8XlGhZauQv4RvUsMPFpg/exec?id=${serial_number}`;
+                console.log(`Fetching device details from API for serial: ${serial_number}`);
+                const apiResponse = await axios.get(apiUrl, { timeout: 30000 }); // 30s timeout
+                const apiData = apiResponse.data;
+
+                if (apiData && typeof apiData === 'object' && apiData.ID) {
+                    const donorName = apiData['Donor Company Name'];
+                    const ngoName = apiData['Allocated To'];
+
+                    if (donorName) {
+                        let donor = await DonorModel.getByName(donorName);
+                        if (!donor) {
+                            console.log(`Creating new donor: ${donorName}`);
+                            donor = await DonorModel.create(donorName, true);
+                        }
+                        donor_id = donor.id;
+                    }
+
+                    if (ngoName) {
+                        let ngo = await NgoModel.getByName(ngoName);
+                        if (!ngo) {
+                            console.log(`Creating new NGO: ${ngoName}`);
+                            ngo = await NgoModel.create(ngoName, true);
+                        }
+                        ngo_id = ngo.id;
+                    }
+                } else {
+                    console.log(`No device data found in Google Script for serial: ${serial_number}`);
+                }
+            } catch (apiError) {
+                console.error(`Error fetching device data from Google Script for ${serial_number}:`, apiError.message);
+            }
+
+            // Check if afe_devices already has a verified serial number for this MAC address
+            const normalizedMac = mac_address ? mac_address.replace(/[:-]/g, '').toLowerCase() : null;
+            let effectiveSerial = serial_number;
+            if (normalizedMac) {
+                try {
+                    const afeRes = await pool.query(
+                        `SELECT * FROM afe_devices 
+                         WHERE LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $1 
+                         LIMIT 1`,
+                        [normalizedMac]
+                    );
+                    const existingAfeDev = afeRes.rows[0];
+                    if (existingAfeDev && existingAfeDev.serial_number && !isFallbackSerial(existingAfeDev.serial_number)) {
+                        if (isFallbackSerial(serial_number) || serial_number !== existingAfeDev.serial_number) {
+                            console.log(`[RMS] Adopting verified serial from afe_devices: ${existingAfeDev.serial_number} (incoming was ${serial_number})`);
+                            effectiveSerial = existingAfeDev.serial_number;
+                        }
+                    }
+                } catch (afeErr) {
+                    console.warn('[RMS] Error checking afe_devices during registration:', afeErr.message);
+                }
+            }
+
+            const device = await DeviceModel.create(username, effectiveSerial, mac_address, location, rms_version, ngo_id, donor_id);
+
+            // Link afe_devices and retroactively link afe_details
+            if (device && device.id && normalizedMac) {
+                try {
+                    await pool.query(
+                        `UPDATE afe_devices SET device_id = $1, has_rms = true, updated_at = CURRENT_TIMESTAMP
+                         WHERE LOWER(REPLACE(REPLACE(mac_address, ':', ''), '-', '')) = $2`,
+                        [device.id, normalizedMac]
+                    );
+                    await pool.query(
+                        `UPDATE afe_details SET device_id = $1
+                         WHERE device_id IS NULL AND (
+                            school_name IN (SELECT school_name FROM afe_devices WHERE device_id = $1)
+                            OR partner_name IN (SELECT partner_name FROM afe_devices WHERE device_id = $1)
+                         )`,
+                        [device.id]
+                    );
+                } catch (linkErr) {
+                    console.warn('[RMS] Error linking afe_devices/afe_details during registration:', linkErr.message);
+                }
+            }
+
+            return res.status(201).json(device);
         } catch (error) {
             console.error('Error registering device:', error);
-            res.status(500).json({ error: 'Failed to register device' });
+            return res.status(500).json({ error: 'Failed to register device' });
         }
     },
-    
+
     getAllDevices: async (req, res) => {
         try {
+            const { pagination, page = 1, limit = 10, search, ngoName, donorName } = req.query;
+
+            if (pagination === '1') {
+                const paginatedResult = await DeviceModel.getAllPaginated(
+                    parseInt(page, 10) || 1, 
+                    parseInt(limit, 10) || 10, 
+                    { search, ngoName, donorName }
+                );
+                return res.json(paginatedResult);
+            }
+
             const devices = await DeviceModel.getAll();
-            res.json(devices);
+            return res.json(devices);
         } catch (error) {
             console.error('Error fetching devices:', error);
-            res.status(500).json({ error: 'Failed to fetch devices' });
+            return res.status(500).json({ error: 'Failed to fetch devices' });
+        }
+    },
+
+    getDeviceBySerialNumber: async (req, res) => {
+        try {
+            const { serial_number } = req.params;
+            const device = await DeviceModel.getBySerialNumber(serial_number);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(device);
+        }
+        catch (error) {
+            console.error('Error fetching device by serial number:', error);
+            return res.status(500).json({ error: 'Failed to fetch device by serial number' });
+        }
+    },
+
+    getDeviceByMacAddress: async (req, res) => {
+        try {
+            const { mac_address } = req.params;
+            const device = await DeviceModel.getByMacAddress(mac_address);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(device);
+        } catch (error) {
+            console.error('Error fetching device by MAC address:', error);
+            return res.status(500).json({ error: 'Failed to fetch device by MAC address' });
+        }
+    },
+
+    statusUpdate: async (req, res) => {
+        try {
+            const { serial_number, isActive, rms_version } = req.body;
+            const deviceId = await DeviceModel.fetchDeviceIdFromSerialNumber(serial_number);
+            if (!deviceId) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+            await DeviceModel.updateDeviceStatus(deviceId, isActive, rms_version);
+            return res.status(200).json({ message: 'Device status updated successfully' });
+        } catch (error) {
+            console.error('Error updating device status:', error);
+            return res.status(500).json({ error: 'Failed to update device status', message: error.message });
+        }
+    },
+
+    getDeviceById: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const device = await DeviceModel.getById(id);
+
+            if (!device) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(device);
+        } catch (error) {
+            console.error('Error fetching device by id:', error);
+            return res.status(500).json({ error: 'Failed to fetch device' });
+        }
+    },
+
+    updateDevice: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { username, ngo_id, donor_id } = req.body;
+
+            // Optional: Validate if NGO or Donor exist before assigning
+            
+            const fieldsToUpdate = {};
+            if (username !== undefined) fieldsToUpdate.username = username;
+            if (ngo_id !== undefined) fieldsToUpdate.ngo_id = ngo_id === '' ? null : ngo_id;
+            if (donor_id !== undefined) fieldsToUpdate.donor_id = donor_id === '' ? null : donor_id;
+
+            const updatedDevice = await DeviceModel.updateDeviceDetails(id, fieldsToUpdate);
+            
+            if (!updatedDevice) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+
+            return res.status(200).json(updatedDevice);
+        } catch (error) {
+            console.error('Error updating device:', error);
+            return res.status(500).json({ error: 'Failed to update device' });
         }
     }
 };
