@@ -1,7 +1,10 @@
+const fs = require('fs');
+const path = require('path');
 const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
 const NGOModel = require('../models/ngoModel');
 const { Parser } = require('json2csv');
+const { uploadToS3, deleteFromS3, getPresignedDownloadUrl } = require('../utils/s3');
 
 const formatDateToDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
@@ -1527,6 +1530,223 @@ const AFEController = {
         } catch (error) {
             console.error('[AFE] Error exporting legacy CSV:', error);
             res.status(500).json({ error: 'Failed to export legacy CSV' });
+        }
+    },
+
+    submitFeedback: async (req, res) => {
+        try {
+            const { serialNumber, schoolUdise, schoolName, message, feedbackType, isDevMode } = req.body;
+            const files = req.files || {};
+            const screenshotFile = files.screenshot ? files.screenshot[0] : null;
+            const logFile = files.log_file ? files.log_file[0] : null;
+
+            const cleanSerial = serialNumber ? String(serialNumber).trim() : null;
+
+            // Validate and normalize feedback type
+            const validTypes = ['BUG', 'SUGGESTION', 'DEV_MODE_LOG'];
+            let resolvedType = 'BUG';
+            if (feedbackType && validTypes.includes(String(feedbackType).toUpperCase())) {
+                resolvedType = String(feedbackType).toUpperCase();
+            }
+
+            // Enforce rate limit: At most 1 feedback per machine per hour (for user submissions)
+            if (cleanSerial && resolvedType !== 'DEV_MODE_LOG') {
+                const oneHourCheck = await pool.query(
+                    `SELECT id, created_at FROM "afe-feedbacks"
+                     WHERE serial_number = $1
+                       AND feedback_type IN ('BUG', 'SUGGESTION')
+                       AND created_at > (NOW() - INTERVAL '1 hour')
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+                    [cleanSerial]
+                );
+
+                if (oneHourCheck.rows.length > 0) {
+                    console.warn(`[AFE Feedback] Rate limit hit for serial: ${cleanSerial}`);
+                    return res.status(429).json({
+                        error: 'Rate limit exceeded: At most 1 feedback can be submitted per machine per hour. Please try again later.',
+                        lastSubmittedAt: oneHourCheck.rows[0].created_at
+                    });
+                }
+            }
+
+            let deviceId = null;
+            if (cleanSerial) {
+                const devRes = await pool.query('SELECT id FROM devices WHERE serial_number = $1 LIMIT 1', [cleanSerial]);
+                if (devRes.rows.length > 0) {
+                    deviceId = devRes.rows[0].id;
+                }
+            }
+
+            // Upload files directly to AWS S3
+            let screenshotKey = null;
+            if (screenshotFile && screenshotFile.buffer) {
+                const safeScreenshotName = (screenshotFile.originalname || `${Date.now()}_screenshot.png`).replace(/[^a-zA-Z0-9_.-]/g, '_');
+                screenshotKey = `afe-feedbacks/screenshots/${safeScreenshotName}`;
+                await uploadToS3(screenshotKey, screenshotFile.buffer, screenshotFile.mimetype || 'image/png');
+            }
+
+            let logKey = null;
+            if (logFile && logFile.buffer) {
+                const safeLogName = (logFile.originalname || `${Date.now()}_logs.log`).replace(/[^a-zA-Z0-9_.-]/g, '_');
+                logKey = `afe-feedbacks/logs/${safeLogName}`;
+                await uploadToS3(logKey, logFile.buffer, logFile.mimetype || 'text/plain');
+            }
+
+            const isDev = isDevMode === 'true' || isDevMode === true || isDevMode === 1 || isDevMode === '1';
+
+            const insertQuery = `
+                INSERT INTO "afe-feedbacks" (
+                    device_id, serial_number, school_udise, school_name, message, feedback_type,
+                    screenshot_url, log_file_url, status, is_dev_mode
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'RECEIVED', $9)
+                RETURNING *
+            `;
+
+            const result = await pool.query(insertQuery, [
+                deviceId,
+                cleanSerial,
+                schoolUdise || null,
+                schoolName || null,
+                message || '',
+                resolvedType,
+                screenshotKey,
+                logKey,
+                isDev
+            ]);
+
+            console.log(`[AFE] Received new feedback #${result.rows[0].id} (Type: ${resolvedType}, DevMode: ${isDev})`);
+            return res.status(201).json({
+                success: true,
+                feedback: result.rows[0]
+            });
+        } catch (error) {
+            console.error('[AFE] Error saving feedback:', error);
+            return res.status(500).json({ error: 'Failed to submit feedback' });
+        }
+    },
+
+    getFeedbacks: async (req, res) => {
+        try {
+            const { status, isDevMode, feedbackType, page = 1, limit = 50 } = req.query;
+            let query = 'SELECT * FROM "afe-feedbacks" WHERE 1=1';
+            const params = [];
+
+            if (status) {
+                params.push(status);
+                query += ` AND status = $${params.length}`;
+            }
+
+            if (isDevMode !== undefined) {
+                const isDev = isDevMode === 'true' || isDevMode === '1';
+                params.push(isDev);
+                query += ` AND is_dev_mode = $${params.length}`;
+            }
+
+            if (feedbackType) {
+                params.push(feedbackType);
+                query += ` AND feedback_type = $${params.length}`;
+            }
+
+            query += ' ORDER BY created_at DESC';
+
+            const offset = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
+            params.push(parseInt(limit, 10));
+            query += ` LIMIT $${params.length}`;
+            params.push(offset);
+            query += ` OFFSET $${params.length}`;
+
+            const result = await pool.query(query, params);
+
+            // Generate presigned download URLs for easy client access
+            const feedbacksWithUrls = await Promise.all(result.rows.map(async (fb) => {
+                const item = { ...fb };
+                if (item.screenshot_url) {
+                    item.screenshotDownloadUrl = await getPresignedDownloadUrl(item.screenshot_url);
+                }
+                if (item.log_file_url) {
+                    item.logDownloadUrl = await getPresignedDownloadUrl(item.log_file_url);
+                }
+                return item;
+            }));
+
+            return res.status(200).json({
+                feedbacks: feedbacksWithUrls,
+                count: feedbacksWithUrls.length
+            });
+        } catch (error) {
+            console.error('[AFE] Error fetching feedbacks:', error);
+            return res.status(500).json({ error: 'Failed to fetch feedbacks' });
+        }
+    },
+
+    updateFeedbackStatus: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { status } = req.body;
+
+            const validStatuses = ['RECEIVED', 'IN PROGRESS', 'RESOLVED'];
+            if (!validStatuses.includes(status)) {
+                return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+            }
+
+            const existingRes = await pool.query('SELECT * FROM "afe-feedbacks" WHERE id = $1', [id]);
+            if (existingRes.rows.length === 0) {
+                return res.status(404).json({ error: 'Feedback not found' });
+            }
+
+            const existing = existingRes.rows[0];
+
+            // When someone marks a feedback as resolved, delete the files from AWS S3
+            if (status === 'RESOLVED') {
+                if (existing.screenshot_url) {
+                    await deleteFromS3(existing.screenshot_url);
+                }
+
+                if (existing.log_file_url) {
+                    await deleteFromS3(existing.log_file_url);
+                }
+
+                // Also clean legacy disk files if any exist
+                const baseDir = path.join(__dirname, '..', 'clientLogs', 'afe-feedbacks');
+                try {
+                    if (existing.screenshot_url && fs.existsSync(path.join(baseDir, existing.screenshot_url))) {
+                        fs.unlinkSync(path.join(baseDir, existing.screenshot_url));
+                    }
+                    if (existing.log_file_url && fs.existsSync(path.join(baseDir, existing.log_file_url))) {
+                        fs.unlinkSync(path.join(baseDir, existing.log_file_url));
+                    }
+                } catch {}
+
+                const updateQuery = `
+                    UPDATE "afe-feedbacks"
+                    SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+                        screenshot_url = NULL, log_file_url = NULL
+                    WHERE id = $1
+                    RETURNING *
+                `;
+                const updated = await pool.query(updateQuery, [id]);
+                return res.status(200).json({
+                    success: true,
+                    feedback: updated.rows[0],
+                    filesDeleted: true
+                });
+            } else {
+                const updateQuery = `
+                    UPDATE "afe-feedbacks"
+                    SET status = $1, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $2
+                    RETURNING *
+                `;
+                const updated = await pool.query(updateQuery, [status, id]);
+                return res.status(200).json({
+                    success: true,
+                    feedback: updated.rows[0]
+                });
+            }
+        } catch (error) {
+            console.error('[AFE] Error updating feedback status:', error);
+            return res.status(500).json({ error: 'Failed to update feedback status' });
         }
     }
 };

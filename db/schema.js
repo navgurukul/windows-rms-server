@@ -1,4 +1,4 @@
-import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text } from "drizzle-orm/pg-core"
+import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text, pgEnum } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm/relations";
 import { sql } from "drizzle-orm"
 
@@ -419,6 +419,40 @@ export const afeDevicesRelations = relations(afeDevices, ({ one }) => ({
     }),
     device: one(devices, {
         fields: [afeDevices.deviceId],
+        references: [devices.id]
+    }),
+}));
+
+// Feedback Status Enum and AFE Feedbacks Table
+export const feedbackStatusEnum = pgEnum("feedback_status", ["RECEIVED", "IN PROGRESS", "RESOLVED"]);
+export const feedbackTypeEnum = pgEnum("feedback_type", ["BUG", "SUGGESTION", "DEV_MODE_LOG"]);
+
+export const afeFeedbacks = pgTable("afe-feedbacks", {
+    id: serial().primaryKey().notNull(),
+    deviceId: integer("device_id"),
+    serialNumber: varchar("serial_number", { length: 255 }),
+    schoolUdise: varchar("school_udise", { length: 50 }),
+    schoolName: varchar("school_name", { length: 255 }),
+    message: text("message"),
+    feedbackType: feedbackTypeEnum("feedback_type").default('BUG').notNull(),
+    screenshotUrl: varchar("screenshot_url", { length: 500 }),
+    logFileUrl: varchar("log_file_url", { length: 500 }),
+    status: feedbackStatusEnum("status").default('RECEIVED').notNull(),
+    isDevMode: boolean("is_dev_mode").default(false),
+    createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: timestamp("updated_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
+    resolvedAt: timestamp("resolved_at", { mode: 'string' }),
+}, (table) => [
+    foreignKey({
+        columns: [table.deviceId],
+        foreignColumns: [devices.id],
+        name: "afe_feedbacks_device_id_fkey"
+    }),
+]);
+
+export const afeFeedbacksRelations = relations(afeFeedbacks, ({ one }) => ({
+    device: one(devices, {
+        fields: [afeFeedbacks.deviceId],
         references: [devices.id]
     }),
 }));
