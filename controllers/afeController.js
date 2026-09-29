@@ -615,12 +615,8 @@ const AFEController = {
                 }
             }
 
-            // Priority: Connected NGO if assigned and not 'Default NGO'. Otherwise, fallback to session.partnerName or 'Sama Digital Foundation – 1'
-            const isValidConnectedNgo = connectedNgoName && connectedNgoName.trim() !== '' && connectedNgoName !== 'Default NGO';
-            const clientPartnerName = (sessions.length > 0 && sessions[0].partnerName)
-                ? sessions[0].partnerName
-                : 'Sama Digital Foundation – 1';
-            const resolvedPartnerName = isValidConnectedNgo ? connectedNgoName : clientPartnerName;
+            // Hardcode partner name to 'Sama Digital Foundation' for RMS sync
+            const resolvedPartnerName = 'Sama Digital Foundation';
 
             // 2. Upsert into afe_devices registry
             const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
@@ -669,8 +665,7 @@ const AFEController = {
             const syncedIds = [];
 
             for (const session of sessions) {
-                const sessionClientPartner = session.partnerName || clientPartnerName;
-                const sessionPartnerName = isValidConnectedNgo ? connectedNgoName : sessionClientPartner;
+                const sessionPartnerName = resolvedPartnerName;
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
