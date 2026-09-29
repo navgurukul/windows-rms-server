@@ -291,7 +291,7 @@ export const afeDetails = pgTable("afe_details", {
     countryCode: varchar("country_code", { length: 10 }).default('IN'),
     distributionChannelHostId: varchar("distribution_channel_host_id", { length: 100 }).default('Sama Platform 1'),
     dataCollectionMethod: varchar("data_collection_method", { length: 100 }).default('Method 2 - Individual Tracking'),
-    partnerName: varchar("partner_name", { length: 150 }).default('Sama Digital Foundation – 1'),
+    partnerName: varchar("partner_name", { length: 150 }).default('Sama Digital Foundation'),
     sessionDate: varchar("session_date", { length: 10 }).notNull(),
     sessionStartDate: varchar("session_start_date", { length: 20 }),
     sessionEndDate: varchar("session_end_date", { length: 20 }),

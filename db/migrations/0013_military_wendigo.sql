@@ -1,0 +1,1 @@
+ALTER TABLE "afe_details" ALTER COLUMN "partner_name" SET DEFAULT 'Sama Digital Foundation';

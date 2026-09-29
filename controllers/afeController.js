@@ -636,7 +636,7 @@ const AFEController = {
                         mac_address = COALESCE($2, mac_address),
                         device_id = COALESCE($3, device_id),
                         ngo_id = COALESCE($4, ngo_id),
-                        partner_name = COALESCE($5, partner_name),
+                        partner_name = $5,
                         school_name = COALESCE($6, school_name),
                         school_udise = COALESCE($7, school_udise),
                         state = COALESCE($8, state),
@@ -1109,8 +1109,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
@@ -1137,8 +1137,8 @@ const AFEController = {
                     course_id: effectiveCourseId,
                     module_id: effectiveCourseId,
                     module_name: effectiveTourName,
-                    ngo_name: row.ngo_name || 'Sama Digital Foundation – 1',
-                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
+                    ngo_name: row.ngo_name || 'Sama Digital Foundation',
+                    partner_name: row.partner_name || 'Sama Digital Foundation',
                     device_id: row.device_id,
                     serial_number: row.serial_number || '',
                     mac_address: row.mac_address || '',
@@ -1259,8 +1259,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
@@ -1450,8 +1450,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
@@ -1495,7 +1495,7 @@ const AFEController = {
                     unit_type_code: mapUnitTypeToCode(row.unit_type),
                     data_collection_method: row.data_collection_method || 'Method 2 - Individual Tracking',
                     data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
-                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
+                    partner_name: row.partner_name || 'Sama Digital Foundation',
                     partner_name_code: 1,
                     data_source: 'AFE CSV Export',
                     session_start_date: row.session_start_date || row.session_date,
