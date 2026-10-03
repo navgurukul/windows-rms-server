@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
 const NGOModel = require('../models/ngoModel');
 const { Parser } = require('json2csv');
+const SamaSchoolService = require('../utils/samaSchoolService');
 
 const formatDateToDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
@@ -468,13 +469,24 @@ const AFEController = {
         });
 
         try {
-            const { macAddress, serialNumber, sessionIds, schoolName, schoolUdise, state, city, district, districtCode, schoolType, platformOs } = req.body;
+            const { macAddress, serialNumber, sessionIds, schoolName: rawSchoolName, schoolUdise, state: rawState, city: rawCity, district: rawDistrict, districtCode: rawDistrictCode, schoolType, platformOs } = req.body;
 
             if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
                 return res.status(400).json({ error: 'Missing or empty sessionIds[]' });
             }
 
-            // 1. Resolve device via MAC address first, then serial number
+            // 1a. Resolve authoritative school data from SAMA registry via UDISE code
+            const resolvedFields = await SamaSchoolService.resolveSchoolFields(schoolUdise);
+            const schoolName = resolvedFields.schoolName || rawSchoolName;
+            const state = resolvedFields.state || rawState;
+            const city = resolvedFields.city || rawCity;
+            const district = resolvedFields.district || rawDistrict;
+            const districtCode = resolvedFields.districtCode || rawDistrictCode;
+            if (Object.keys(resolvedFields).length > 0) {
+                console.log(`[AFE Backfill] UDISE ${schoolUdise} resolved to "${schoolName}" (${district}, ${state})`);
+            }
+
+            // 1b. Resolve device via MAC address first, then serial number
             const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
             const deviceId = matchedDevice ? matchedDevice.id : null;
             const ngoId = matchedDevice ? matchedDevice.ngo_id : null;
@@ -618,9 +630,27 @@ const AFEController = {
             // Hardcode partner name to 'Sama Digital Foundation' for RMS sync
             const resolvedPartnerName = 'Sama Digital Foundation';
 
+            // 1b. Resolve authoritative school data from SAMA registry via UDISE code
+            const firstSession = sessions[0] || {};
+            const sessionUdise = firstSession.schoolUdise || null;
+            const resolvedFields = await SamaSchoolService.resolveSchoolFields(sessionUdise);
+            if (Object.keys(resolvedFields).length > 0) {
+                console.log(`[AFE Sync] UDISE ${sessionUdise} resolved to "${resolvedFields.schoolName}" (${resolvedFields.district}, ${resolvedFields.state})`);
+                // Patch firstSession with authoritative data for afe_devices upsert
+                if (resolvedFields.schoolName) firstSession.schoolName = resolvedFields.schoolName;
+                if (resolvedFields.state) firstSession.state = resolvedFields.state;
+                if (resolvedFields.city) firstSession.city = resolvedFields.city;
+                if (resolvedFields.district) firstSession.district = resolvedFields.district;
+                if (resolvedFields.districtCode) firstSession.districtCode = resolvedFields.districtCode;
+                if (resolvedFields.zipcodePostalCode) {
+                    firstSession.zipcodePostalCode = resolvedFields.zipcodePostalCode;
+                    firstSession.zipcode_postal_code = resolvedFields.zipcodePostalCode;
+                }
+                if (resolvedFields.distributionChannelHostId) firstSession.distributionChannelHostId = resolvedFields.distributionChannelHostId;
+            }
+
             // 2. Upsert into afe_devices registry
             const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
-            const firstSession = sessions[0] || {};
             const existingAfeDev = await client.query(
                 `SELECT id FROM afe_devices 
                  WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(mac_address, '-', ':')) = $1)
@@ -662,10 +692,38 @@ const AFEController = {
             }
 
             // 3. Upsert sessions (idempotent via unique constraint on session_id)
+            // Pre-resolve school fields for each unique UDISE in the batch
+            const udiseCache = new Map();
+            if (Object.keys(resolvedFields).length > 0 && sessionUdise) {
+                udiseCache.set(sessionUdise, resolvedFields);
+            }
             const syncedIds = [];
 
             for (const session of sessions) {
                 const sessionPartnerName = resolvedPartnerName;
+
+                // Resolve school fields for this session's UDISE (may differ per session)
+                const thisUdise = session.schoolUdise || null;
+                let sessionSchoolFields = {};
+                if (thisUdise) {
+                    if (udiseCache.has(thisUdise)) {
+                        sessionSchoolFields = udiseCache.get(thisUdise);
+                    } else {
+                        sessionSchoolFields = await SamaSchoolService.resolveSchoolFields(thisUdise);
+                        udiseCache.set(thisUdise, sessionSchoolFields);
+                    }
+                    // Overwrite session fields with authoritative data
+                    if (sessionSchoolFields.schoolName) session.schoolName = sessionSchoolFields.schoolName;
+                    if (sessionSchoolFields.state) session.state = sessionSchoolFields.state;
+                    if (sessionSchoolFields.city) session.city = sessionSchoolFields.city;
+                    if (sessionSchoolFields.district) session.district = sessionSchoolFields.district;
+                    if (sessionSchoolFields.districtCode) session.districtCode = sessionSchoolFields.districtCode;
+                    if (sessionSchoolFields.zipcodePostalCode) {
+                        session.zipcodePostalCode = sessionSchoolFields.zipcodePostalCode;
+                        session.zipcode_postal_code = sessionSchoolFields.zipcodePostalCode;
+                    }
+                    if (sessionSchoolFields.distributionChannelHostId) session.distributionChannelHostId = sessionSchoolFields.distributionChannelHostId;
+                }
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
@@ -1522,6 +1580,139 @@ const AFEController = {
         } catch (error) {
             console.error('[AFE] Error exporting legacy CSV:', error);
             res.status(500).json({ error: 'Failed to export legacy CSV' });
+        }
+    },
+
+    /**
+     * Lookup a single school by UDISE code from the SAMA registry
+     * GET /api/afe/schools/udise/:udiseCode
+     */
+    lookupSchoolByUdise: async (req, res) => {
+        try {
+            const { udiseCode } = req.params;
+            if (!udiseCode || !udiseCode.trim()) {
+                return res.status(400).json({ error: 'udiseCode parameter is required' });
+            }
+
+            const school = await SamaSchoolService.resolveSchool(udiseCode.trim());
+            if (!school) {
+                return res.status(404).json({
+                    success: false,
+                    message: `School with UDISE code ${udiseCode} not found in SAMA registry`
+                });
+            }
+
+            return res.status(200).json({ success: true, data: school });
+        } catch (error) {
+            console.error('[AFE] Error looking up school by UDISE:', error);
+            return res.status(500).json({ error: 'Failed to lookup school' });
+        }
+    },
+
+    /**
+     * Get the full UDISE map of all registered schools
+     * GET /api/afe/schools/udise-map
+     */
+    getSchoolUdiseMap: async (req, res) => {
+        try {
+            const fullMap = await SamaSchoolService.getFullMap();
+            return res.status(200).json({ success: true, data: fullMap });
+        } catch (error) {
+            console.error('[AFE] Error fetching UDISE map:', error);
+            return res.status(500).json({ error: 'Failed to fetch school UDISE map' });
+        }
+    },
+
+    /**
+     * Reconcile all existing afe_devices and afe_details records with SAMA school registry.
+     * Fetches the full UDISE map and updates any records whose school fields don't match.
+     * POST /api/afe/reconcile-schools
+     */
+    reconcileAllSchools: async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const fullMap = await SamaSchoolService.getFullMap();
+            const udiseCodes = Object.keys(fullMap);
+
+            if (udiseCodes.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    message: 'No schools found in SAMA registry',
+                    devicesUpdated: 0,
+                    detailsUpdated: 0
+                });
+            }
+
+            await client.query('BEGIN');
+
+            let devicesUpdated = 0;
+            let detailsUpdated = 0;
+
+            for (const udise of udiseCodes) {
+                const school = fullMap[udise];
+                if (!school || !school.name) continue;
+
+                // Update afe_devices
+                const devResult = await client.query(
+                    `UPDATE afe_devices SET
+                        school_name = $1,
+                        state = $2,
+                        city = $3,
+                        district = $4,
+                        district_code = $5,
+                        zipcode_postal_code = COALESCE($6, zipcode_postal_code),
+                        updated_at = CURRENT_TIMESTAMP
+                     WHERE school_udise = $7`,
+                    [school.name, school.state, school.city, school.district, school.district_code, school.zipcode, udise]
+                );
+                devicesUpdated += devResult.rowCount;
+
+                // Update afe_details
+                const detResult = await client.query(
+                    `UPDATE afe_details SET
+                        school_name = $1,
+                        state = $2,
+                        city = $3,
+                        district = $4,
+                        district_code = $5,
+                        zipcode_postal_code = COALESCE($6, zipcode_postal_code),
+                        updated_at = CURRENT_TIMESTAMP
+                     WHERE school_udise = $7`,
+                    [school.name, school.state, school.city, school.district, school.district_code, school.zipcode, udise]
+                );
+                detailsUpdated += detResult.rowCount;
+            }
+
+            await client.query('COMMIT');
+
+            console.log(`[AFE] School reconciliation complete: ${devicesUpdated} device rows, ${detailsUpdated} detail rows updated across ${udiseCodes.length} schools`);
+
+            return res.status(200).json({
+                success: true,
+                message: 'School data reconciliation complete',
+                schoolsProcessed: udiseCodes.length,
+                devicesUpdated,
+                detailsUpdated
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[AFE] Error reconciling schools:', error);
+            return res.status(500).json({ error: 'Failed to reconcile school data' });
+        } finally {
+            client.release();
+        }
+    },
+
+    /**
+     * Get SAMA school cache statistics
+     * GET /api/afe/schools/cache-stats
+     */
+    getSchoolCacheStats: async (req, res) => {
+        try {
+            const stats = SamaSchoolService.getCacheStats();
+            return res.status(200).json({ success: true, data: stats });
+        } catch (error) {
+            return res.status(500).json({ error: 'Failed to get cache stats' });
         }
     }
 };
