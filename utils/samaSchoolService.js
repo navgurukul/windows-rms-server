@@ -187,13 +187,64 @@ async function resolveSchoolFields(udiseCode) {
 
     return {
         schoolName: school.name || null,
+        schoolUdise: school.udise || udiseCode,
         state: school.state || null,
         city: school.city || null,
         district: school.district || null,
         districtCode: school.district_code || null,
         zipcodePostalCode: school.zipcode || null,
         distributionChannelHostId: school.distribution_host_id || null,
+        ngoKey: school.ngo_id ? String(school.ngo_id).trim() : null,
+        partnerName: school.partner_name ? String(school.partner_name).trim() : null,
+        schoolId: school.school_id || null,
     };
+}
+
+/**
+ * Resolve the database NGO for a school's authoritative SAMA registry metadata.
+ * Matches against the "NGOs" table by unique_key (e.g. 'SAM-91'). If not found,
+ * attempts to reconcile or create via NGOModel.
+ *
+ * @param {{ ngoKey?: string, partnerName?: string }} schoolData
+ * @param {import('pg').PoolClient | import('pg').Pool} dbClient
+ * @param {object} [NGOModel]
+ * @returns {Promise<{ id: number, name: string, uniqueKey: string } | null>}
+ */
+async function resolveSchoolNgo(schoolData, dbClient, NGOModel) {
+    if (!schoolData) return null;
+    const key = schoolData.ngoKey ? String(schoolData.ngoKey).trim() : null;
+    const name = schoolData.partnerName ? String(schoolData.partnerName).trim() : null;
+
+    if (key) {
+        const res = await dbClient.query(
+            'SELECT id, "NGO_name", unique_key FROM "NGOs" WHERE unique_key = $1',
+            [key]
+        );
+        if (res.rows.length > 0) {
+            return {
+                id: res.rows[0].id,
+                name: res.rows[0].NGO_name,
+                uniqueKey: res.rows[0].unique_key,
+            };
+        }
+    }
+
+    if (name && NGOModel) {
+        try {
+            const rec = await NGOModel.reconcileWithSama(name, key);
+            if (rec) {
+                return {
+                    id: rec.id,
+                    name: rec.NGO_name,
+                    uniqueKey: rec.unique_key,
+                };
+            }
+        } catch (e) {
+            console.warn('[SamaSchoolService] NGO reconcile error:', e.message);
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -222,6 +273,7 @@ function clearCache() {
 module.exports = {
     resolveSchool,
     resolveSchoolFields,
+    resolveSchoolNgo,
     warmUpCache,
     getFullMap,
     getCacheStats,
