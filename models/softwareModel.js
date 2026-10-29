@@ -35,6 +35,9 @@ const SoftwareModel = {
         );
 
         const result = allSoftwares.filter(software => {
+            // Check if software is active
+            if (software.isactive === false) return false;
+
             // Check if software is applicable
             const isApplicable = software.is_global || donorSoftwareIds.has(software.id) || ngoSoftwareIds.has(software.id);
             if (!isApplicable) return false;
