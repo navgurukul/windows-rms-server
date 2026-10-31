@@ -2,6 +2,21 @@
 const { pool } = require('../config/database');
 const DeviceModel = require('./deviceModel');
 
+function isVersionAtLeast(currentVersion, targetVersion) {
+    if (!currentVersion) return false;
+    const parse = v => String(v).split('.').map(n => parseInt(n, 10) || 0);
+    const curr = parse(currentVersion);
+    const target = parse(targetVersion);
+    for (let i = 0; i < Math.max(curr.length, target.length); i++) {
+        const c = curr[i] || 0;
+        const t = target[i] || 0;
+        if (c > t) return true;
+        if (c < t) return false;
+    }
+    return true;
+}
+
+
 const SoftwareModel = {
 
     getNotInstalledSoftwares: async (serial_number) => {
@@ -37,6 +52,16 @@ const SoftwareModel = {
         const result = allSoftwares.filter(software => {
             // Check if software is active
             if (software.isactive === false) return false;
+
+            // Never serve upgrade packages to devices that already report v1.4.1 or higher
+            if (software.software_name && software.software_name.toLowerCase().includes('upgrade') && isVersionAtLeast(deviceDetails.rms_version, '1.4.1')) {
+                return false;
+            }
+
+            // Devices older than 1.3.0 do not support source === 'script'
+            if (software.source === 'script' && !isVersionAtLeast(deviceDetails.rms_version, '1.3.0')) {
+                return false;
+            }
 
             // Check if software is applicable
             const isApplicable = software.is_global || donorSoftwareIds.has(software.id) || ngoSoftwareIds.has(software.id);
