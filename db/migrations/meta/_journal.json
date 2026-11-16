@@ -99,6 +99,13 @@
       "when": 1790674019044,
       "tag": "0013_military_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794799930850,
+      "tag": "0014_cheerful_magneto",
+      "breakpoints": true
     }
   ]
 }

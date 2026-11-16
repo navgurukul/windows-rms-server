@@ -97,7 +97,24 @@ const SoftwareModel = {
                 software_name: s.software_name,
                 winget_id: s.winget_id,
                 source: s.source,
-                isPortable: s.is_portable
+                isPortable: s.is_portable,
+                installer_type: s.installer_type || (
+                    s.source === 'rms-repository' ? (
+                        ((s.software_name && (s.software_name.toLowerCase().includes('inno') || s.software_name.toLowerCase().includes('aitutor'))) ||
+                         (s.winget_id && (s.winget_id.toLowerCase().includes('inno') || s.winget_id.toLowerCase().includes('aitutor'))))
+                            ? 'inno'
+                            : (s.winget_id && s.winget_id.toLowerCase().endsWith('.msi') ? 'msi' : 'custom_exe')
+                    ) : (s.source === 'script' ? 'script' : 'winget')
+                ),
+                silent_args: s.silent_args || {},
+                run_as: s.run_as || 'system',
+                elevation: s.elevation || 'highest',
+                pre_install_script: s.pre_install_script || null,
+                post_install_script: s.post_install_script || null,
+                custom_install_script: s.custom_install_script || null,
+                process_name_to_wait: s.process_name_to_wait || null,
+                timeout_seconds: s.timeout_seconds ? Number(s.timeout_seconds) : 600,
+                success_exit_codes: s.success_exit_codes || '0,3010'
             }));
     },
 

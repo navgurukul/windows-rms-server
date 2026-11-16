@@ -1,4 +1,4 @@
-import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text } from "drizzle-orm/pg-core"
+import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text, jsonb } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm/relations";
 import { sql } from "drizzle-orm"
 
@@ -49,6 +49,16 @@ export const softwares = pgTable("softwares", {
     wingetId: varchar("winget_id", { length: 255 }).notNull(),
     source: varchar("source", { length: 255 }).default('winget'),
     isGlobal: boolean("is_global").default(true),
+    installerType: varchar("installer_type", { length: 50 }).default('winget'),
+    silentArgs: jsonb("silent_args").default({}),
+    runAs: varchar("run_as", { length: 30 }).default('system'),
+    elevation: varchar("elevation", { length: 30 }).default('highest'),
+    preInstallScript: text("pre_install_script"),
+    postInstallScript: text("post_install_script"),
+    customInstallScript: text("custom_install_script"),
+    processNameToWait: varchar("process_name_to_wait", { length: 100 }),
+    timeoutSeconds: integer("timeout_seconds").default(600),
+    successExitCodes: varchar("success_exit_codes", { length: 50 }).default('0,3010'),
     is_portable: boolean("is_portable").default(false),
     isactive: boolean().default(true),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
