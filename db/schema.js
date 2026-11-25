@@ -12,6 +12,7 @@ export const devices = pgTable("devices", {
     rms_version: varchar("rms_version", { length: 50 }).default('0.0.0'),
     location: varchar({ length: 255 }).notNull(),
     isactive: boolean().default(true),
+    isTesting: boolean("is_testing").default(false),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
     unique("devices_serial_number_key").on(table.serialNumber),
@@ -61,6 +62,7 @@ export const softwares = pgTable("softwares", {
     successExitCodes: varchar("success_exit_codes", { length: 50 }).default('0,3010'),
     is_portable: boolean("is_portable").default(false),
     isactive: boolean().default(true),
+    isTesting: boolean("is_testing").default(false),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 });
 

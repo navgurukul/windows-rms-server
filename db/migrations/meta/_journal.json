@@ -106,6 +106,13 @@
       "when": 1794799930850,
       "tag": "0014_cheerful_magneto",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795415977006,
+      "tag": "0015_tiny_raider",
+      "breakpoints": true
     }
   ]
 }

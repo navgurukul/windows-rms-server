@@ -7,7 +7,7 @@ const fetchDeviceByIdentifiers = async (mac_address, serial_number) => {
     if (mac_address && mac_address !== 'Unknown' && mac_address !== 'UNKNOWN-MAC') {
         const normalizedMac = mac_address.replace(/[:-]/g, '').toLowerCase();
         const macRes = await pool.query(
-            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address
+            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address, d.is_testing
              FROM devices d
              LEFT JOIN "NGOs" n ON d.ngo_id = n.id
              WHERE LOWER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = $1
@@ -22,7 +22,7 @@ const fetchDeviceByIdentifiers = async (mac_address, serial_number) => {
     // Priority 2: Match by case-insensitive trimmed serial number (Fallback)
     if (serial_number && serial_number !== 'Unknown' && serial_number !== 'UNKNOWN-SERIAL') {
         const serialRes = await pool.query(
-            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address
+            `SELECT d.id, d.ngo_id, n."NGO_name" as ngo_name, d.serial_number, d.mac_address, d.is_testing
              FROM devices d
              LEFT JOIN "NGOs" n ON d.ngo_id = n.id
              WHERE UPPER(TRIM(d.serial_number)) = UPPER(TRIM($1))
@@ -43,7 +43,7 @@ const fetchDeviceIdFromSerialNumber = async (serial_number) => {
 };
 
 const DeviceModel = {
-    create: async (username, serial_number, mac_address, location, rms_version = '0.0.0', ngo_id = null, donor_id = null) => {
+    create: async (username, serial_number, mac_address, location, rms_version = '0.0.0', ngo_id = null, donor_id = null, is_testing = false) => {
         // Check if device already exists by serial_number or mac_address
         const deviceExists = await pool.query(
             'SELECT * FROM devices WHERE serial_number = $1 OR mac_address = $2',
@@ -55,8 +55,8 @@ const DeviceModel = {
             return deviceExists.rows[0];
         }
         const result = await pool.query(
-            'INSERT INTO devices (username, serial_number, mac_address, location, rms_version, ngo_id, donor_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [username, serial_number, mac_address, location, rms_version, ngo_id, donor_id]
+            'INSERT INTO devices (username, serial_number, mac_address, location, rms_version, ngo_id, donor_id, is_testing) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [username, serial_number, mac_address, location, rms_version, ngo_id, donor_id, is_testing]
         );
         return result.rows[0];
     },

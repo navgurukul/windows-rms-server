@@ -60,7 +60,7 @@ app.set('trust proxy', true);
 app.use(limiter);
 app.use(logger);
 
-// Serve wallpapers directory as static files (public)
+// Serve wallpapers and softwares directories as static files (public)
 app.use('/wallpapers', express.static('wallpapers'));
 app.use('/softwares', express.static('softwares'));
 
