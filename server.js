@@ -1,4 +1,5 @@
 // server/server.js
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
@@ -61,8 +62,8 @@ app.use(limiter);
 app.use(logger);
 
 // Serve wallpapers and softwares directories as static files (public)
-app.use('/wallpapers', express.static('wallpapers'));
-app.use('/softwares', express.static('softwares'));
+app.use('/wallpapers', express.static(path.join(__dirname, 'wallpapers')));
+app.use('/softwares', express.static(path.join(__dirname, 'softwares')));
 
 // Auth status route (public)
 app.use('/api/auth', authRoutes);

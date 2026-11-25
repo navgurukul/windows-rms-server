@@ -32,10 +32,7 @@ const uploadMiddleware = (req, res, next) => {
     req.setTimeout(30 * 60 * 1000);
     res.setTimeout(30 * 60 * 1000);
 
-    upload.fields([
-        { name: 'file', maxCount: 1 },
-        { name: 'software', maxCount: 1 }
-    ])(req, res, (err) => {
+    upload.any()(req, res, (err) => {
         if (err) {
             if (err instanceof multer.MulterError) {
                 if (err.code === 'LIMIT_FILE_SIZE') {
@@ -45,8 +42,8 @@ const uploadMiddleware = (req, res, next) => {
             }
             return res.status(400).json({ error: err.message });
         }
-        if (req.files) {
-            req.file = req.files['file']?.[0] || req.files['software']?.[0] || null;
+        if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+            req.file = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'software') || req.files[0];
         }
         next();
     });
@@ -178,6 +175,28 @@ const SoftwareController = {
                 return res.status(400).json({ error: 'wingetId or an uploaded file is required' });
             }
 
+            // Enforce physical installer presence for rms-repository source
+            if (effectiveSource === 'rms-repository') {
+                const targetFilePath = path.join(softwaresDir, effectiveWingetId);
+                const existsOnDisk = fs.existsSync(targetFilePath);
+
+                if (!uploadedFile && !existsOnDisk) {
+                    cleanupUploadedFile();
+                    return res.status(400).json({
+                        error: `Physical installer file is required for rms-repository. No uploaded file received for "${effectiveWingetId}".`
+                    });
+                }
+
+                // If file was uploaded with original name but effectiveWingetId is different, rename to match effectiveWingetId
+                if (uploadedFile && uploadedFile.filename !== effectiveWingetId) {
+                    if (uploadedFile.path !== targetFilePath) {
+                        fs.renameSync(uploadedFile.path, targetFilePath);
+                        uploadedFile.path = targetFilePath;
+                        uploadedFile.filename = effectiveWingetId;
+                    }
+                }
+            }
+
             // Check duplicate name
             const existing = await SoftwareModel.getByName(softwareName.trim());
             if (existing) {
@@ -239,10 +258,10 @@ const SoftwareController = {
 
             return res.status(201).json({
                 ...newSoftware,
-                uploadedFile: uploadedFile ? {
-                    filename: uploadedFile.filename,
-                    size: uploadedFile.size,
-                    path: `/softwares/${uploadedFile.filename}`
+                uploadedFile: (uploadedFile || (effectiveSource === 'rms-repository' && fs.existsSync(path.join(softwaresDir, effectiveWingetId)))) ? {
+                    filename: effectiveWingetId,
+                    size: uploadedFile ? uploadedFile.size : fs.statSync(path.join(softwaresDir, effectiveWingetId)).size,
+                    path: `/softwares/${effectiveWingetId}`
                 } : undefined
             });
         } catch (error) {
