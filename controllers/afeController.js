@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const DeviceModel = require('../models/deviceModel');
 const NGOModel = require('../models/ngoModel');
 const { Parser } = require('json2csv');
+const SamaSchoolService = require('../utils/samaSchoolService');
 
 const formatDateToDDMMYYYY = (dateStr) => {
     if (!dateStr) return '';
@@ -468,20 +469,46 @@ const AFEController = {
         });
 
         try {
-            const { macAddress, serialNumber, sessionIds, schoolName, schoolUdise, state, city, district, districtCode, schoolType, platformOs } = req.body;
+            const { macAddress, serialNumber, sessionIds, schoolName: rawSchoolName, schoolUdise, state: rawState, city: rawCity, district: rawDistrict, districtCode: rawDistrictCode, schoolType, platformOs } = req.body;
 
             if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
                 return res.status(400).json({ error: 'Missing or empty sessionIds[]' });
             }
 
-            // 1. Resolve device via MAC address first, then serial number
+            // 1a. Resolve authoritative school data from SAMA registry via UDISE code
+            const resolvedFields = await SamaSchoolService.resolveSchoolFields(schoolUdise);
+            const schoolName = resolvedFields.schoolName || rawSchoolName;
+            const state = resolvedFields.state || rawState;
+            const city = resolvedFields.city || rawCity;
+            const district = resolvedFields.district || rawDistrict;
+            const districtCode = resolvedFields.districtCode || rawDistrictCode;
+            if (Object.keys(resolvedFields).length > 0) {
+                console.log(`[AFE Backfill] UDISE ${schoolUdise} resolved to "${schoolName}" (${district}, ${state})`);
+            }
+
+            // 1b. Resolve device via MAC address first, then serial number
             const matchedDevice = await DeviceModel.fetchDeviceByIdentifiers(macAddress, serialNumber);
             const deviceId = matchedDevice ? matchedDevice.id : null;
-            const ngoId = matchedDevice ? matchedDevice.ngo_id : null;
-            const partnerName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : 'sama';
+            let ngoId = matchedDevice ? matchedDevice.ngo_id : null;
+            let partnerName = matchedDevice && matchedDevice.ngo_name ? matchedDevice.ngo_name : 'sama';
             const hasRms = !!matchedDevice;
 
             await client.query('BEGIN');
+
+            // 1c. Authoritative NGO resolution from SAMA registry (UDISE)
+            if (resolvedFields.ngoKey || resolvedFields.partnerName) {
+                const authoritativeNgo = await SamaSchoolService.resolveSchoolNgo(resolvedFields, client, NGOModel);
+                if (authoritativeNgo) {
+                    ngoId = authoritativeNgo.id;
+                    partnerName = authoritativeNgo.name;
+                    console.log(`[AFE Backfill] Authoritative NGO applied for UDISE ${schoolUdise}: id=${ngoId}, name="${partnerName}"`);
+                }
+            }
+
+            // Keep device ngo_id in sync if device exists in RMS
+            if (deviceId && ngoId) {
+                await client.query('UPDATE devices SET ngo_id = $1 WHERE id = $2', [ngoId, deviceId]);
+            }
 
             // 2. Upsert into afe_devices registry
             const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
@@ -525,20 +552,24 @@ const AFEController = {
                 );
             }
 
-            // 3. Update existing records in afe_details if RMS device was matched
+            // 3. Update existing records in afe_details
             let updatedCount = 0;
-            if (deviceId) {
-                const updateRes = await client.query(
-                    `UPDATE afe_details
-                     SET device_id = $1,
-                         ngo_id = COALESCE($2, ngo_id),
-                         partner_name = COALESCE($3, partner_name),
-                         updated_at = CURRENT_TIMESTAMP
-                     WHERE session_id = ANY($4)`,
-                    [deviceId, ngoId, partnerName, sessionIds]
-                );
-                updatedCount = updateRes.rowCount;
-            }
+            const updateRes = await client.query(
+                `UPDATE afe_details
+                 SET device_id = COALESCE($1, device_id),
+                     ngo_id = COALESCE($2, ngo_id),
+                     school_name = $3,
+                     school_udise = $4,
+                     state = $5,
+                     city = $6,
+                     district = $7,
+                     district_code = $8,
+                     school_type = COALESCE($9, school_type),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE session_id = ANY($10)`,
+                [deviceId, ngoId, schoolName, schoolUdise, state, city, district, districtCode, schoolType, sessionIds]
+            );
+            updatedCount = updateRes.rowCount;
 
             await client.query('COMMIT');
             console.log(`[AFE Backfill] Successfully processed backfill for ${sessionIds.length} sessions, updated ${updatedCount} rows (device_id: ${deviceId})`);
@@ -592,39 +623,76 @@ const AFEController = {
 
             await client.query('BEGIN');
 
-            // 1. If client partner name and/or NGO key is provided, reconcile and link NGO
-            const rawPartner = (sessions.length > 0 && sessions[0].partnerName) ? sessions[0].partnerName : null;
-            if (rawPartner && !ngoId) {
-                try {
-                    const reconciled = await NGOModel.reconcileWithSama(rawPartner, ngoKey);
-                    if (reconciled) {
-                        ngoId = reconciled.id;
-                        if (!connectedNgoName) connectedNgoName = reconciled.NGO_name;
-                    }
-                } catch (recErr) {
-                    console.warn('[AFE] NGO reconciliation warning during sync:', recErr.message);
+            // 1. Resolve authoritative school data from SAMA registry via UDISE code
+            const firstSession = sessions[0] || {};
+            const sessionUdise = firstSession.schoolUdise || null;
+            const resolvedFields = await SamaSchoolService.resolveSchoolFields(sessionUdise);
+            if (Object.keys(resolvedFields).length > 0) {
+                console.log(`[AFE Sync] UDISE ${sessionUdise} resolved to "${resolvedFields.schoolName}" (${resolvedFields.district}, ${resolvedFields.state})`);
+                // Patch firstSession with authoritative data for afe_devices upsert
+                if (resolvedFields.schoolName) firstSession.schoolName = resolvedFields.schoolName;
+                if (resolvedFields.state) firstSession.state = resolvedFields.state;
+                if (resolvedFields.city) firstSession.city = resolvedFields.city;
+                if (resolvedFields.district) firstSession.district = resolvedFields.district;
+                if (resolvedFields.districtCode) firstSession.districtCode = resolvedFields.districtCode;
+                if (resolvedFields.zipcodePostalCode) {
+                    firstSession.zipcodePostalCode = resolvedFields.zipcodePostalCode;
+                    firstSession.zipcode_postal_code = resolvedFields.zipcodePostalCode;
                 }
-            } else if (ngoKey && !ngoId) {
-                const ngoResult = await client.query(
-                    'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
-                    [ngoKey]
-                );
-                if (ngoResult.rows.length > 0) {
-                    ngoId = ngoResult.rows[0].id;
-                    if (!connectedNgoName) connectedNgoName = ngoResult.rows[0].NGO_name;
+                if (resolvedFields.distributionChannelHostId) firstSession.distributionChannelHostId = resolvedFields.distributionChannelHostId;
+            }
+
+            // 1b. Authoritative NGO Resolution:
+            // SAMA registry is the source of truth for which NGO a school belongs to.
+            // If the UDISE code maps to an NGO, that authoritative NGO MUST OVERRIDE any client-provided or mismatched NGO.
+            let authoritativeNgo = null;
+            if (resolvedFields.ngoKey || resolvedFields.partnerName) {
+                authoritativeNgo = await SamaSchoolService.resolveSchoolNgo(resolvedFields, client, NGOModel);
+            }
+
+            if (authoritativeNgo) {
+                ngoId = authoritativeNgo.id;
+                connectedNgoName = authoritativeNgo.name;
+                resolvedFields.ngoId = authoritativeNgo.id;
+                console.log(`[AFE Sync] Authoritative NGO applied from SAMA registry for UDISE ${sessionUdise}: id=${ngoId}, name="${connectedNgoName}", key="${authoritativeNgo.uniqueKey}"`);
+            } else if (!ngoId) {
+                // Fallback: If no authoritative NGO was resolved from UDISE, check client partner name and/or NGO key
+                const rawPartner = (sessions.length > 0 && sessions[0].partnerName) ? sessions[0].partnerName : null;
+                if (rawPartner) {
+                    try {
+                        const reconciled = await NGOModel.reconcileWithSama(rawPartner, ngoKey);
+                        if (reconciled) {
+                            ngoId = reconciled.id;
+                            if (!connectedNgoName) connectedNgoName = reconciled.NGO_name;
+                        }
+                    } catch (recErr) {
+                        console.warn('[AFE] NGO reconciliation warning during sync:', recErr.message);
+                    }
+                } else if (ngoKey) {
+                    const ngoResult = await client.query(
+                        'SELECT id, "NGO_name" FROM "NGOs" WHERE unique_key = $1',
+                        [ngoKey]
+                    );
+                    if (ngoResult.rows.length > 0) {
+                        ngoId = ngoResult.rows[0].id;
+                        if (!connectedNgoName) connectedNgoName = ngoResult.rows[0].NGO_name;
+                    }
                 }
             }
 
-            // Priority: Connected NGO if assigned and not 'Default NGO'. Otherwise, fallback to session.partnerName or 'Sama Digital Foundation – 1'
-            const isValidConnectedNgo = connectedNgoName && connectedNgoName.trim() !== '' && connectedNgoName !== 'Default NGO';
-            const clientPartnerName = (sessions.length > 0 && sessions[0].partnerName)
-                ? sessions[0].partnerName
-                : 'Sama Digital Foundation – 1';
-            const resolvedPartnerName = isValidConnectedNgo ? connectedNgoName : clientPartnerName;
+            // Ensure RMS devices table reflects the authoritative NGO
+            if (deviceId && ngoId) {
+                await client.query(
+                    'UPDATE devices SET ngo_id = $1 WHERE id = $2',
+                    [ngoId, deviceId]
+                );
+            }
+
+            // Hardcode partner name to 'Sama Digital Foundation' for RMS sync
+            const resolvedPartnerName = 'Sama Digital Foundation';
 
             // 2. Upsert into afe_devices registry
             const normalizedMac = macAddress ? macAddress.replace(/-/g, ':').toLowerCase() : null;
-            const firstSession = sessions[0] || {};
             const existingAfeDev = await client.query(
                 `SELECT id FROM afe_devices 
                  WHERE (mac_address IS NOT NULL AND LOWER(REPLACE(mac_address, '-', ':')) = $1)
@@ -640,7 +708,7 @@ const AFEController = {
                         mac_address = COALESCE($2, mac_address),
                         device_id = COALESCE($3, device_id),
                         ngo_id = COALESCE($4, ngo_id),
-                        partner_name = COALESCE($5, partner_name),
+                        partner_name = $5,
                         school_name = COALESCE($6, school_name),
                         school_udise = COALESCE($7, school_udise),
                         state = COALESCE($8, state),
@@ -666,11 +734,49 @@ const AFEController = {
             }
 
             // 3. Upsert sessions (idempotent via unique constraint on session_id)
+            // Pre-resolve school fields for each unique UDISE in the batch
+            const udiseCache = new Map();
+            if (Object.keys(resolvedFields).length > 0 && sessionUdise) {
+                udiseCache.set(sessionUdise, resolvedFields);
+            }
             const syncedIds = [];
 
             for (const session of sessions) {
-                const sessionClientPartner = session.partnerName || clientPartnerName;
-                const sessionPartnerName = isValidConnectedNgo ? connectedNgoName : sessionClientPartner;
+                const sessionPartnerName = resolvedPartnerName;
+
+                // Resolve school fields for this session's UDISE (may differ per session)
+                const thisUdise = session.schoolUdise || null;
+                let sessionSchoolFields = {};
+                let sessionNgoId = ngoId;
+
+                if (thisUdise) {
+                    if (udiseCache.has(thisUdise)) {
+                        sessionSchoolFields = udiseCache.get(thisUdise);
+                    } else {
+                        sessionSchoolFields = await SamaSchoolService.resolveSchoolFields(thisUdise);
+                        if (sessionSchoolFields.ngoKey || sessionSchoolFields.partnerName) {
+                            const authNgo = await SamaSchoolService.resolveSchoolNgo(sessionSchoolFields, client, NGOModel);
+                            if (authNgo) sessionSchoolFields.ngoId = authNgo.id;
+                        }
+                        udiseCache.set(thisUdise, sessionSchoolFields);
+                    }
+
+                    if (sessionSchoolFields.ngoId) {
+                        sessionNgoId = sessionSchoolFields.ngoId;
+                    }
+
+                    // Overwrite session fields with authoritative data
+                    if (sessionSchoolFields.schoolName) session.schoolName = sessionSchoolFields.schoolName;
+                    if (sessionSchoolFields.state) session.state = sessionSchoolFields.state;
+                    if (sessionSchoolFields.city) session.city = sessionSchoolFields.city;
+                    if (sessionSchoolFields.district) session.district = sessionSchoolFields.district;
+                    if (sessionSchoolFields.districtCode) session.districtCode = sessionSchoolFields.districtCode;
+                    if (sessionSchoolFields.zipcodePostalCode) {
+                        session.zipcodePostalCode = sessionSchoolFields.zipcodePostalCode;
+                        session.zipcode_postal_code = sessionSchoolFields.zipcodePostalCode;
+                    }
+                    if (sessionSchoolFields.distributionChannelHostId) session.distributionChannelHostId = sessionSchoolFields.distributionChannelHostId;
+                }
                 const result = await client.query(
                     `INSERT INTO afe_details
                     (ngo_id, device_id, session_id, country_code, distribution_channel_host_id, data_collection_method, partner_name, session_date,
@@ -757,7 +863,7 @@ const AFEController = {
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id`,
                     [
-                        ngoId,
+                        sessionNgoId,
                         deviceId,
                         session.sessionId,
                         session.countryCode || 'IN',
@@ -1114,8 +1220,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ${sortColumn} ${order}, ad.id DESC
@@ -1142,8 +1248,8 @@ const AFEController = {
                     course_id: effectiveCourseId,
                     module_id: effectiveCourseId,
                     module_name: effectiveTourName,
-                    ngo_name: row.ngo_name || 'Sama Digital Foundation – 1',
-                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
+                    ngo_name: (row.ngo_name && !row.ngo_name.includes('Sama Digital Foundation')) ? row.ngo_name : 'Sama Digital Foundation',
+                    partner_name: 'Sama Digital Foundation',
                     device_id: row.device_id,
                     serial_number: row.serial_number || '',
                     mac_address: row.mac_address || '',
@@ -1264,8 +1370,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
@@ -1455,8 +1561,8 @@ const AFEController = {
                     ad.*,
                     COALESCE(d.serial_number, adev.serial_number, '') as serial_number,
                     COALESCE(d.mac_address, adev.mac_address, '') as mac_address,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as ngo_name,
-                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation – 1') as partner_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as ngo_name,
+                    COALESCE(NULLIF(n."NGO_name", 'Default NGO'), NULLIF(dn."NGO_name", 'Default NGO'), NULLIF(NULLIF(ad.partner_name, 'Default NGO'), 'sama'), 'Sama Digital Foundation') as partner_name,
                     COALESCE(ad.school_name, dn."NGO_name") as school_name
                 ${baseQuery}
                 ORDER BY ad.session_date DESC, ad.student_dummy_id
@@ -1500,7 +1606,7 @@ const AFEController = {
                     unit_type_code: mapUnitTypeToCode(row.unit_type),
                     data_collection_method: row.data_collection_method || 'Method 2 - Individual Tracking',
                     data_collection_method_code: mapDataCollectionMethodToCode(row.data_collection_method),
-                    partner_name: row.partner_name || 'Sama Digital Foundation – 1',
+                    partner_name: 'Sama Digital Foundation',
                     partner_name_code: 1,
                     data_source: 'AFE CSV Export',
                     session_start_date: row.session_start_date || row.session_date,
@@ -1527,6 +1633,152 @@ const AFEController = {
         } catch (error) {
             console.error('[AFE] Error exporting legacy CSV:', error);
             res.status(500).json({ error: 'Failed to export legacy CSV' });
+        }
+    },
+
+    /**
+     * Lookup a single school by UDISE code from the SAMA registry
+     * GET /api/afe/schools/udise/:udiseCode
+     */
+    lookupSchoolByUdise: async (req, res) => {
+        try {
+            const { udiseCode } = req.params;
+            if (!udiseCode || !udiseCode.trim()) {
+                return res.status(400).json({ error: 'udiseCode parameter is required' });
+            }
+
+            const school = await SamaSchoolService.resolveSchool(udiseCode.trim());
+            if (!school) {
+                return res.status(404).json({
+                    success: false,
+                    message: `School with UDISE code ${udiseCode} not found in SAMA registry`
+                });
+            }
+
+            return res.status(200).json({ success: true, data: school });
+        } catch (error) {
+            console.error('[AFE] Error looking up school by UDISE:', error);
+            return res.status(500).json({ error: 'Failed to lookup school' });
+        }
+    },
+
+    /**
+     * Get the full UDISE map of all registered schools
+     * GET /api/afe/schools/udise-map
+     */
+    getSchoolUdiseMap: async (req, res) => {
+        try {
+            const fullMap = await SamaSchoolService.getFullMap();
+            return res.status(200).json({ success: true, data: fullMap });
+        } catch (error) {
+            console.error('[AFE] Error fetching UDISE map:', error);
+            return res.status(500).json({ error: 'Failed to fetch school UDISE map' });
+        }
+    },
+
+    /**
+     * Reconcile all existing afe_devices and afe_details records with SAMA school registry.
+     * Fetches the full UDISE map and updates any records whose school fields don't match.
+     * POST /api/afe/reconcile-schools
+     */
+    reconcileAllSchools: async (req, res) => {
+        const client = await pool.connect();
+        try {
+            const fullMap = await SamaSchoolService.getFullMap();
+            const udiseCodes = Object.keys(fullMap);
+
+            if (udiseCodes.length === 0) {
+                return res.status(200).json({
+                    success: true,
+                    message: 'No schools found in SAMA registry',
+                    devicesUpdated: 0,
+                    detailsUpdated: 0
+                });
+            }
+
+            await client.query('BEGIN');
+
+            let devicesUpdated = 0;
+            let detailsUpdated = 0;
+
+            for (const udise of udiseCodes) {
+                const school = fullMap[udise];
+                if (!school || !school.name) continue;
+
+                // Resolve authoritative NGO for this school from SAMA registry
+                let schoolNgoId = null;
+                if (school.ngo_id || school.partner_name) {
+                    const authNgo = await SamaSchoolService.resolveSchoolNgo(
+                        { ngoKey: school.ngo_id, partnerName: school.partner_name },
+                        client,
+                        NGOModel
+                    );
+                    if (authNgo) schoolNgoId = authNgo.id;
+                }
+
+                // Update afe_devices
+                const devResult = await client.query(
+                    `UPDATE afe_devices SET
+                        ngo_id = COALESCE($1, ngo_id),
+                        school_name = $2,
+                        state = $3,
+                        city = $4,
+                        district = $5,
+                        district_code = $6,
+                        zipcode_postal_code = COALESCE($7, zipcode_postal_code),
+                        updated_at = CURRENT_TIMESTAMP
+                     WHERE school_udise = $8`,
+                    [schoolNgoId, school.name, school.state, school.city, school.district, school.district_code, school.zipcode, udise]
+                );
+                devicesUpdated += devResult.rowCount;
+
+                // Update afe_details
+                const detResult = await client.query(
+                    `UPDATE afe_details SET
+                        ngo_id = COALESCE($1, ngo_id),
+                        school_name = $2,
+                        state = $3,
+                        city = $4,
+                        district = $5,
+                        district_code = $6,
+                        zipcode_postal_code = COALESCE($7, zipcode_postal_code),
+                        updated_at = CURRENT_TIMESTAMP
+                     WHERE school_udise = $8`,
+                    [schoolNgoId, school.name, school.state, school.city, school.district, school.district_code, school.zipcode, udise]
+                );
+                detailsUpdated += detResult.rowCount;
+            }
+
+            await client.query('COMMIT');
+
+            console.log(`[AFE] School reconciliation complete: ${devicesUpdated} device rows, ${detailsUpdated} detail rows updated across ${udiseCodes.length} schools`);
+
+            return res.status(200).json({
+                success: true,
+                message: 'School data reconciliation complete',
+                schoolsProcessed: udiseCodes.length,
+                devicesUpdated,
+                detailsUpdated
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('[AFE] Error reconciling schools:', error);
+            return res.status(500).json({ error: 'Failed to reconcile school data' });
+        } finally {
+            client.release();
+        }
+    },
+
+    /**
+     * Get SAMA school cache statistics
+     * GET /api/afe/schools/cache-stats
+     */
+    getSchoolCacheStats: async (req, res) => {
+        try {
+            const stats = SamaSchoolService.getCacheStats();
+            return res.status(200).json({ success: true, data: stats });
+        } catch (error) {
+            return res.status(500).json({ error: 'Failed to get cache stats' });
         }
     }
 };

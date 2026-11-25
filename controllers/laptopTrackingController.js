@@ -36,11 +36,11 @@ const syncLaptopData = async (req, res) => {
         }
         // Get the date to use for aggregation (UTC midnight)
         // Use provided timestamp or current time
-        const recordDate = timestamp ? new Date(timestamp) : new Date();
+        const recordDate = (timestamp || req.body.date) ? new Date(timestamp || req.body.date) : new Date();
         recordDate.setHours(0, 0, 0, 0);
 
         // Get the actual timestamp to record (now or provided)
-        const actualTimestamp = timestamp ? new Date(timestamp) : new Date();
+        const actualTimestamp = (timestamp || req.body.last_updated) ? new Date(timestamp || req.body.last_updated) : new Date();
 
         // Check if an entry already exists for this user/system/day
         const existingEntry = await pool.query(
@@ -59,10 +59,10 @@ const syncLaptopData = async (req, res) => {
                 // If total_time is provided, use the larger value
                 const currentTime = parseInt(currentEntry.total_active_time);
                 const newTotalTime = parseInt(total_time);
-                updatedTime = newTotalTime > currentTime ? newTotalTime : currentTime;
+                updatedTime = Math.min(newTotalTime > currentTime ? newTotalTime : currentTime, 1440);
             } else {
                 // Otherwise add the active_time to the existing total
-                updatedTime = parseInt(currentEntry.total_active_time) + parseInt(active_time);
+                updatedTime = Math.min((parseInt(currentEntry.total_active_time) || 0) + (parseInt(active_time) || 0), 1440);
             }
 
             await pool.query(
@@ -91,7 +91,7 @@ const syncLaptopData = async (req, res) => {
                  RETURNING id, total_active_time`,
                 [
                     device_id,
-                    total_time !== undefined ? total_time : active_time, // Use total_time if provided, otherwise active_time
+                    Math.min(parseInt(total_time !== undefined ? total_time : active_time) || 0, 1440), // Capped at 1440 minutes
                     latitude || null,
                     longitude || null,
                     location_name || null,
@@ -190,7 +190,7 @@ const bulkSyncLaptopData = async (req, res) => {
                 // Otherwise, use our existing value (don't decrease usage time)
                 const currentTime = parseInt(currentEntry.total_active_time);
                 const newTime = parseInt(record.total_time);
-                const updatedTime = newTime > currentTime ? newTime : currentTime;
+                const updatedTime = Math.min(newTime > currentTime ? newTime : currentTime, 1440);
 
                 const updateResult = await client.query(
                     `UPDATE laptop_tracking 
@@ -227,7 +227,7 @@ const bulkSyncLaptopData = async (req, res) => {
                      RETURNING id, total_active_time`,
                     [
                         device_id,
-                        record.total_time, // Use the provided total_time directly
+                        Math.min(parseInt(record.total_time) || 0, 1440), // Capped at 1440 minutes
                         latitude,
                         longitude,
                         location_name,

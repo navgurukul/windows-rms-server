@@ -13,4 +13,10 @@ router.get('/details', AFEController.getDetails);
 router.get('/export-csv', AFEController.exportCsv);
 router.get('/export-csv-legacy', AFEController.exportCsvLegacy);
 
+// SAMA School Registry Lookup Routes
+router.get('/schools/udise-map', AFEController.getSchoolUdiseMap);
+router.get('/schools/cache-stats', AFEController.getSchoolCacheStats);
+router.get('/schools/udise/:udiseCode', AFEController.lookupSchoolByUdise);
+router.post('/reconcile-schools', AFEController.reconcileAllSchools);
+
 module.exports = router;

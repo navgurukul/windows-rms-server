@@ -1,4 +1,4 @@
-import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text } from "drizzle-orm/pg-core"
+import { pgTable, unique, serial, varchar, boolean, timestamp, foreignKey, integer, numeric, text, jsonb } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm/relations";
 import { sql } from "drizzle-orm"
 
@@ -12,6 +12,7 @@ export const devices = pgTable("devices", {
     rms_version: varchar("rms_version", { length: 50 }).default('0.0.0'),
     location: varchar({ length: 255 }).notNull(),
     isactive: boolean().default(true),
+    isTesting: boolean("is_testing").default(false),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
     unique("devices_serial_number_key").on(table.serialNumber),
@@ -49,8 +50,19 @@ export const softwares = pgTable("softwares", {
     wingetId: varchar("winget_id", { length: 255 }).notNull(),
     source: varchar("source", { length: 255 }).default('winget'),
     isGlobal: boolean("is_global").default(true),
+    installerType: varchar("installer_type", { length: 50 }).default('winget'),
+    silentArgs: jsonb("silent_args").default({}),
+    runAs: varchar("run_as", { length: 30 }).default('system'),
+    elevation: varchar("elevation", { length: 30 }).default('highest'),
+    preInstallScript: text("pre_install_script"),
+    postInstallScript: text("post_install_script"),
+    customInstallScript: text("custom_install_script"),
+    processNameToWait: varchar("process_name_to_wait", { length: 100 }),
+    timeoutSeconds: integer("timeout_seconds").default(600),
+    successExitCodes: varchar("success_exit_codes", { length: 50 }).default('0,3010'),
     is_portable: boolean("is_portable").default(false),
     isactive: boolean().default(true),
+    isTesting: boolean("is_testing").default(false),
     createdAt: timestamp("created_at", { mode: 'string' }).default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -291,7 +303,7 @@ export const afeDetails = pgTable("afe_details", {
     countryCode: varchar("country_code", { length: 10 }).default('IN'),
     distributionChannelHostId: varchar("distribution_channel_host_id", { length: 100 }).default('Sama Platform 1'),
     dataCollectionMethod: varchar("data_collection_method", { length: 100 }).default('Method 2 - Individual Tracking'),
-    partnerName: varchar("partner_name", { length: 150 }).default('Sama Digital Foundation – 1'),
+    partnerName: varchar("partner_name", { length: 150 }).default('Sama Digital Foundation'),
     sessionDate: varchar("session_date", { length: 10 }).notNull(),
     sessionStartDate: varchar("session_start_date", { length: 20 }),
     sessionEndDate: varchar("session_end_date", { length: 20 }),

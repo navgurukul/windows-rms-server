@@ -7,7 +7,8 @@ const { pool } = require('../config/database');
 const DeviceController = {
     registerDevice: async (req, res) => {
         try {
-            const { username, serial_number, mac_address, location, rms_version } = req.body;
+            const { username, serial_number, mac_address, location, rms_version, is_testing, isTesting } = req.body;
+            const effectiveIsTesting = is_testing !== undefined ? Boolean(is_testing) : (isTesting !== undefined ? Boolean(isTesting) : false);
 
             if (!username || !serial_number || !mac_address || !location) {
                 return res.status(400).json({ error: 'Username, serial_number, mac_address, and location are required' });
@@ -24,12 +25,16 @@ const DeviceController = {
             let existingDevice = await DeviceModel.getBySerialNumber(serial_number);
             if (existingDevice) {
                 console.log(`Device found by serial number: ${serial_number}. Updating details if changed.`);
-                existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
+                const updateFields = {
                     username,
                     mac_address,
                     location,
                     rms_version
-                });
+                };
+                if (is_testing !== undefined || isTesting !== undefined) {
+                    updateFields.is_testing = effectiveIsTesting;
+                }
+                existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, updateFields);
                 return res.status(200).json(existingDevice);
             }
 
@@ -41,22 +46,21 @@ const DeviceController = {
                 const existingIsFallback = isFallbackSerial(existingDevice.serial_number);
                 const incomingIsFallback = isFallbackSerial(serial_number);
 
+                const updateFields = {
+                    username,
+                    location,
+                    rms_version
+                };
                 if (existingIsFallback && !incomingIsFallback) {
                     console.log(`Upgrading fallback serial ${existingDevice.serial_number} to hardware serial ${serial_number} in DB.`);
-                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
-                        serial_number,
-                        username,
-                        location,
-                        rms_version
-                    });
+                    updateFields.serial_number = serial_number;
                 } else {
                     console.log(`Keeping existing serial ${existingDevice.serial_number} in DB. Updating other details.`);
-                    existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, {
-                        username,
-                        location,
-                        rms_version
-                    });
                 }
+                if (is_testing !== undefined || isTesting !== undefined) {
+                    updateFields.is_testing = effectiveIsTesting;
+                }
+                existingDevice = await DeviceModel.updateDeviceDetails(existingDevice.id, updateFields);
                 return res.status(200).json(existingDevice);
             }
 
@@ -122,7 +126,7 @@ const DeviceController = {
                 }
             }
 
-            const device = await DeviceModel.create(username, effectiveSerial, mac_address, location, rms_version, ngo_id, donor_id);
+            const device = await DeviceModel.create(username, effectiveSerial, mac_address, location, rms_version, ngo_id, donor_id, effectiveIsTesting);
 
             // Link afe_devices and retroactively link afe_details
             if (device && device.id && normalizedMac) {
@@ -240,7 +244,7 @@ const DeviceController = {
     updateDevice: async (req, res) => {
         try {
             const { id } = req.params;
-            const { username, ngo_id, donor_id } = req.body;
+            const { username, ngo_id, donor_id, is_testing, isTesting } = req.body;
 
             // Optional: Validate if NGO or Donor exist before assigning
             
@@ -248,6 +252,8 @@ const DeviceController = {
             if (username !== undefined) fieldsToUpdate.username = username;
             if (ngo_id !== undefined) fieldsToUpdate.ngo_id = ngo_id === '' ? null : ngo_id;
             if (donor_id !== undefined) fieldsToUpdate.donor_id = donor_id === '' ? null : donor_id;
+            if (is_testing !== undefined) fieldsToUpdate.is_testing = Boolean(is_testing);
+            else if (isTesting !== undefined) fieldsToUpdate.is_testing = Boolean(isTesting);
 
             const updatedDevice = await DeviceModel.updateDeviceDetails(id, fieldsToUpdate);
             
@@ -259,6 +265,26 @@ const DeviceController = {
         } catch (error) {
             console.error('Error updating device:', error);
             return res.status(500).json({ error: 'Failed to update device' });
+        }
+    },
+
+    updateDeviceTestingStatus: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const is_testing = req.body.is_testing !== undefined ? req.body.is_testing : req.body.isTesting;
+            if (is_testing === undefined) {
+                return res.status(400).json({ error: 'is_testing boolean is required' });
+            }
+            const updatedDevice = await DeviceModel.updateDeviceDetails(id, {
+                is_testing: Boolean(is_testing)
+            });
+            if (!updatedDevice) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+            return res.status(200).json(updatedDevice);
+        } catch (error) {
+            console.error('Error updating device testing status:', error);
+            return res.status(500).json({ error: 'Failed to update device testing status' });
         }
     }
 };

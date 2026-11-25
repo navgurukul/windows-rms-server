@@ -9,6 +9,7 @@ router.get('/serial/:serial_number', DeviceController.getDeviceBySerialNumber);
 router.get('/mac/:mac_address', DeviceController.getDeviceByMacAddress);
 router.get('/:id', DeviceController.getDeviceById);
 router.put('/:id', DeviceController.updateDevice);
+router.patch('/:id/testing', DeviceController.updateDeviceTestingStatus);
 router.post('/statusUpdate', DeviceController.statusUpdate);
 
 module.exports = router;

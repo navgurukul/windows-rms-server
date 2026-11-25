@@ -1,4 +1,5 @@
 // server/server.js
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
@@ -41,6 +42,7 @@ const { verifyApiKey } = require('./middleware/auth');
 // Import database initialization
 const { pool, createSoftwareSeeder } = require('./config/database');
 const { scheduleLogCleanup } = require('./utils/logCleanup');
+const SamaSchoolService = require('./utils/samaSchoolService');
 
 // Simple logger middleware
 const logger = (req, res, next) => {
@@ -59,9 +61,9 @@ app.set('trust proxy', true);
 app.use(limiter);
 app.use(logger);
 
-// Serve wallpapers directory as static files (public)
-app.use('/wallpapers', express.static('wallpapers'));
-app.use('/softwares', express.static('softwares'));
+// Serve wallpapers and softwares directories as static files (public)
+app.use('/wallpapers', express.static(path.join(__dirname, 'wallpapers')));
+app.use('/softwares', express.static(path.join(__dirname, 'softwares')));
 
 // Auth status route (public)
 app.use('/api/auth', authRoutes);
@@ -99,6 +101,10 @@ async function startServer() {
       console.log(`Database ready`);
       // Start log cleanup scheduler
       scheduleLogCleanup();
+      // Pre-warm SAMA school registry cache (non-blocking)
+      SamaSchoolService.warmUpCache().catch(err => {
+        console.warn('[Server] SAMA school cache warm-up failed (non-critical):', err.message);
+      });
     });
   } catch (error) {
     console.error('Failed to start server:', error);
